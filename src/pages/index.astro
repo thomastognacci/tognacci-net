@@ -114,27 +114,43 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
           <div id="scene" aria-hidden="true"></div>
           <div class="social-links">
             {links.map((link) => (
-              <a
-                class={`social-link ${link.id}`}
-                data-object={link.id}
-                href={link.href}
-                aria-label={
-                  link.id === 'email'
-                    ? 'Email Thomas Tognacci'
-                    : `${link.title} (opens in a new tab)`
-                }
-                target={link.id === 'email' ? undefined : '_blank'}
-                rel={link.id === 'email' ? undefined : 'noopener noreferrer'}
-              >
-                <span class="object-space" aria-hidden="true">
-                  <span class="fallback-object">{link.fallback}</span>
-                </span>
-              </a>
+              <div class={`social-slot ${link.id}`}>
+                <a
+                  class={`social-link ${link.id}`}
+                  data-object={link.id}
+                  href={link.href}
+                  aria-label={
+                    link.id === 'email'
+                      ? 'Email Thomas Tognacci'
+                      : `${link.title} (opens in a new tab)`
+                  }
+                  target={link.id === 'email' ? undefined : '_blank'}
+                  rel={link.id === 'email' ? undefined : 'noopener noreferrer'}
+                >
+                  <span class="object-space" aria-hidden="true">
+                    <span class="fallback-object">{link.fallback}</span>
+                  </span>
+                </a>
+              </div>
             ))}
           </div>
         </div>
         <div class="hero-bottom">
-          <button id="motion-toggle" type="button" aria-pressed="false" hidden>
+          <button
+            id="reset-positions"
+            class="motion-control"
+            type="button"
+            hidden
+          >
+            Reset positions
+          </button>
+          <button
+            class="motion-control"
+            id="motion-toggle"
+            type="button"
+            aria-pressed="false"
+            hidden
+          >
             <span class="motion-icon" aria-hidden="true">
               Ⅱ
             </span>

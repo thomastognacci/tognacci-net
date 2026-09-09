@@ -1,3 +1,4 @@
+import { convexHull, getContact, type Point2 } from './collision';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
@@ -118,7 +119,9 @@ function createObject(id: ObjectId) {
 
 export function createScene(isPaused: () => boolean) {
   const container = document.querySelector<HTMLElement>('#scene');
-  if (!container) return;
+  const resetButton =
+    document.querySelector<HTMLButtonElement>('#reset-positions');
+  if (!container || !resetButton) return;
   let renderer: THREE.WebGLRenderer;
   try {
     renderer = new THREE.WebGLRenderer({
@@ -130,14 +133,12 @@ export function createScene(isPaused: () => boolean) {
     return;
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-  renderer.setClearColor(0, 0);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.4;
   container.appendChild(renderer.domElement);
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-4, 4, 2, -2, 0.1, 100);
-  camera.position.set(0, 0, 10);
+  camera.position.z = 10;
   scene.add(new THREE.HemisphereLight('#e8dfff', '#4a2d73', 2.5));
   const key = new THREE.DirectionalLight('#fff2eb', 5);
   key.position.set(-3, 5, 6);
@@ -145,6 +146,7 @@ export function createScene(isPaused: () => boolean) {
   const rim = new THREE.DirectionalLight('#adbcff', 4);
   rim.position.set(4, 1, -2);
   scene.add(rim);
+
   const objects = Array.from(
     document.querySelectorAll<HTMLAnchorElement>('[data-object]'),
   ).map((link, index) => {
@@ -153,115 +155,450 @@ export function createScene(isPaused: () => boolean) {
       throw new Error('Unknown social object');
     const group = createObject(id);
     scene.add(group);
-    const item = { group, link, index, hover: false, x: 0, y: 0, scale: 1 };
-    for (const event of ['pointerenter', 'focus'])
-      link.addEventListener(event, () => {
-        item.hover = true;
-        requestFrame();
-      });
-    for (const event of ['pointerleave', 'blur'])
-      link.addEventListener(event, () => {
-        item.hover = false;
-        requestFrame();
-      });
-    return item;
+    const body = group.children[0] as THREE.Mesh<THREE.BufferGeometry>;
+    const positions = body.geometry.getAttribute('position');
+    const unique = new Map<string, THREE.Vector3>();
+    for (let i = 0; i < positions.count; i++) {
+      const vertex = new THREE.Vector3().fromBufferAttribute(positions, i);
+      const key = `${vertex.x.toFixed(6)},${vertex.y.toFixed(6)},${vertex.z.toFixed(6)}`;
+      unique.set(key, vertex);
+    }
+    return {
+      group,
+      vertices: [...unique.values()],
+      hull: [] as Point2[],
+      link,
+      index,
+      slot: link.closest<HTMLElement>('.social-slot')!,
+      localBounds: new THREE.Box3().setFromObject(group),
+      hover: false,
+      focused: false,
+      floating: false,
+      suppressClick: false,
+      x: 0,
+      y: 0,
+      homeX: 0,
+      homeY: 0,
+      vx: 0,
+      vy: 0,
+      scale: 1,
+      halfWidth: 100,
+      halfHeight: 100,
+    };
   });
+  type Item = (typeof objects)[number];
+  type Drag = {
+    item: Item;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    offsetX: number;
+    offsetY: number;
+    lastX: number;
+    lastY: number;
+    lastTime: number;
+    moved: boolean;
+  };
+  let drag: Drag | null = null;
   let frame = 0;
-  let visible = true;
+  let contextLost = false;
+  let stageVisible = true;
   let elapsed = 0;
   let previous = 0;
+  let width = 0;
+  let height = 0;
   let pointerX = 0;
   let pointerY = 0;
   const finePointer = window.matchMedia('(pointer: fine)');
+  const transformedBounds = new THREE.Box3();
+  const size = new THREE.Vector3();
+
+  function contain(item: Item, bounce = false) {
+    const left = item.halfWidth + 10;
+    const right = Math.max(left, width - left);
+    const top = item.halfHeight + 10;
+    const bottom = Math.max(top, height - top);
+    if (item.x < left || item.x > right) {
+      item.x = THREE.MathUtils.clamp(item.x, left, right);
+      if (bounce)
+        item.vx =
+          item.x === left
+            ? Math.abs(item.vx) * 0.65
+            : -Math.abs(item.vx) * 0.65;
+    }
+    if (item.y < top || item.y > bottom) {
+      item.y = THREE.MathUtils.clamp(item.y, top, bottom);
+      if (bounce)
+        item.vy =
+          item.y === top ? Math.abs(item.vy) * 0.65 : -Math.abs(item.vy) * 0.65;
+    }
+  }
+
+  function resolveCollisions() {
+    const held = (item: Item) =>
+      drag?.item === item || item.hover || item.focused;
+    // A few passes settle chains of contacts, including contacts near a wall.
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 0; i < objects.length; i++) {
+        for (let j = i + 1; j < objects.length; j++) {
+          const a = objects[i];
+          const b = objects[j];
+          if (!a.floating && !b.floating) continue;
+          // An untouched icon scrolled off the page should stay at its home.
+          if (
+            [a, b].some(
+              (item) =>
+                !item.floating &&
+                (item.y + item.halfHeight < 0 ||
+                  item.y - item.halfHeight > height),
+            )
+          )
+            continue;
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const overlapX = a.halfWidth + b.halfWidth - Math.abs(dx);
+          const overlapY = a.halfHeight + b.halfHeight - Math.abs(dy);
+          if (overlapX <= 0 || overlapY <= 0) continue;
+          const contact = getContact(a, b);
+          if (!contact) continue;
+          const massA = held(a) ? 0 : 1;
+          const massB = held(b) ? 0 : 1;
+          const totalMass = massA + massB;
+          if (!totalMass) continue;
+          const { nx, ny, depth } = contact;
+          const separation = (depth + 0.25) / totalMass;
+          for (const [item, mass, direction] of [
+            [a, massA, -1],
+            [b, massB, 1],
+          ] as const) {
+            if (!mass) continue;
+            item.floating = true;
+            item.x += nx * separation * direction;
+            item.y += ny * separation * direction;
+          }
+          // A grabbed icon pushes its neighbour but is not moved by the impact.
+          const avx = massA || drag?.item === a ? a.vx : 0;
+          const avy = massA || drag?.item === a ? a.vy : 0;
+          const bvx = massB || drag?.item === b ? b.vx : 0;
+          const bvy = massB || drag?.item === b ? b.vy : 0;
+          const closingSpeed = (bvx - avx) * nx + (bvy - avy) * ny;
+          if (closingSpeed < 0) {
+            const impulse = (-(1 + 0.45) * closingSpeed) / totalMass;
+            a.vx -= impulse * nx * massA;
+            a.vy -= impulse * ny * massA;
+            b.vx += impulse * nx * massB;
+            b.vy += impulse * ny * massB;
+            for (const item of [a, b]) {
+              item.vx = THREE.MathUtils.clamp(item.vx, -1000, 1000);
+              item.vy = THREE.MathUtils.clamp(item.vy, -1000, 1000);
+            }
+          }
+          resetButton?.removeAttribute('hidden');
+        }
+      }
+      for (const item of objects) if (item.floating) contain(item, true);
+    }
+  }
+
   function draw(now = 0) {
     frame = 0;
+    if (contextLost) return;
     const paused = isPaused();
-    if (!paused && previous) elapsed += Math.min((now - previous) / 1000, 0.05);
+    const dt =
+      !paused && previous ? Math.min((now - previous) / 1000, 0.04) : 0;
+    elapsed += dt;
     previous = now;
     for (const item of objects) {
       const { group, index } = item;
       const phase = elapsed * 0.7 + index * 2.1;
-      group.position.set(
-        item.x,
-        item.y + (paused ? 0 : Math.sin(phase) * 0.07),
+      group.position.set(0, 0, 0);
+      group.rotation.set(
+        0.13 + Math.sin(phase * 0.7) * 0.05 + (paused ? 0 : pointerY * 0.07),
+        baseRotationY[index] +
+          Math.cos(phase * 0.8) * 0.09 +
+          (paused ? 0 : pointerX * 0.12),
+        baseRotationZ[index] + Math.sin(phase) * 0.045,
+      );
+      group.scale.setScalar(item.scale * (item.hover && !paused ? 1.04 : 1));
+      group.updateMatrix();
+      const matrix = group.matrix.elements;
+      item.hull = convexHull(
+        item.vertices.map((vertex) => ({
+          x:
+            (matrix[0] * vertex.x +
+              matrix[4] * vertex.y +
+              matrix[8] * vertex.z) *
+            100,
+          y:
+            -(
+              matrix[1] * vertex.x +
+              matrix[5] * vertex.y +
+              matrix[9] * vertex.z
+            ) * 100,
+        })),
+      );
+      transformedBounds
+        .copy(item.localBounds)
+        .applyMatrix4(group.matrix)
+        .getSize(size);
+      item.halfWidth = size.x * 50 + 3;
+      item.halfHeight = size.y * 50 + 3;
+      if (item.floating) {
+        if (!paused && drag?.item !== item && !item.hover && !item.focused) {
+          item.x += item.vx * dt;
+          item.y += item.vy * dt;
+          const damping = Math.exp(-0.55 * dt);
+          item.vx *= damping;
+          item.vy *= damping;
+          if (Math.hypot(item.vx, item.vy) < 2) item.vx = item.vy = 0;
+        }
+        contain(item, true);
+      } else {
+        item.x = item.homeX;
+        item.y = item.homeY + Math.sin(phase) * 7;
+      }
+    }
+    if (!paused) resolveCollisions();
+    for (const item of objects) {
+      item.group.position.set(
+        (item.x - width / 2) / 100,
+        (height / 2 - item.y) / 100,
         0,
       );
-      group.rotation.set(
-        0.13 + (paused ? 0 : Math.sin(phase * 0.7) * 0.05 + pointerY * 0.07),
-        baseRotationY[index] +
-          (paused ? 0 : Math.cos(phase * 0.8) * 0.09 + pointerX * 0.12),
-        baseRotationZ[index] + (paused ? 0 : Math.sin(phase) * 0.045),
-      );
-      group.scale.setScalar(item.scale * (item.hover && !paused ? 1.06 : 1));
+      // The real HTML link travels with the mesh; keyboard navigation stays native.
+      item.link.style.width = `${item.halfWidth * 2}px`;
+      item.link.style.height = `${item.halfHeight * 2}px`;
+      item.link.style.transform = `translate3d(${item.x - item.halfWidth}px, ${item.y - item.halfHeight}px, 0)`;
     }
     renderer.render(scene, camera);
-    if (!paused && visible && !document.hidden)
+    if (
+      !paused &&
+      !document.hidden &&
+      (stageVisible || objects.some((item) => item.floating))
+    )
       frame = requestAnimationFrame(draw);
   }
   function requestFrame() {
-    if (!frame && visible && !document.hidden)
+    if (!frame && !contextLost && !document.hidden)
       frame = requestAnimationFrame(draw);
   }
   function measure() {
-    const rect = container!.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    renderer.setSize(rect.width, rect.height);
-    camera.left = -rect.width / 200;
-    camera.right = rect.width / 200;
-    camera.top = rect.height / 200;
-    camera.bottom = -rect.height / 200;
+    const nextWidth = document.documentElement.clientWidth;
+    const nextHeight = innerHeight;
+    if (width !== nextWidth || height !== nextHeight)
+      renderer.setSize(nextWidth, nextHeight);
+    width = nextWidth;
+    height = nextHeight;
+    camera.left = -width / 200;
+    camera.right = width / 200;
+    camera.top = height / 200;
+    camera.bottom = -height / 200;
     camera.updateProjectionMatrix();
     for (const item of objects) {
-      const space = item.link
-        .querySelector('.object-space')!
-        .getBoundingClientRect();
-      item.x =
-        (space.left + space.width / 2 - rect.left - rect.width / 2) / 100;
-      item.y =
-        -(space.top + space.height / 2 - rect.top - rect.height / 2) / 100;
-      item.scale = Math.min(1, space.width / 240);
+      const rect = item.slot.getBoundingClientRect();
+      item.homeX = rect.left + rect.width / 2;
+      item.homeY = rect.top + rect.height / 2;
+      item.scale = Math.min(1, rect.width / 240, width / 280, height / 280);
     }
   }
+  function finishDrag(cancelled = false) {
+    if (!drag) return;
+    const { item, pointerId, moved, lastTime } = drag;
+    drag = null;
+    item.link.classList.remove('is-dragging');
+    item.suppressClick = moved;
+    if (cancelled || isPaused() || performance.now() - lastTime > 120)
+      item.vx = item.vy = 0;
+    if (item.link.hasPointerCapture(pointerId))
+      item.link.releasePointerCapture(pointerId);
+    // Pointer capture can leave :hover on the released link until the next move.
+    item.hover = false;
+    requestFrame();
+  }
+
+  for (const item of objects) {
+    const { link } = item;
+    link.addEventListener('pointerenter', () => {
+      item.hover = true;
+      requestFrame();
+    });
+    link.addEventListener('pointerleave', () => {
+      item.hover = false;
+      requestFrame();
+    });
+    link.addEventListener('focus', () => {
+      item.focused = true;
+      if (!item.floating) {
+        const rect = item.slot.getBoundingClientRect();
+        if (rect.top < 0 || rect.bottom > height) {
+          item.slot.scrollIntoView({ block: 'center', behavior: 'instant' });
+          measure();
+        }
+      }
+      requestFrame();
+    });
+    link.addEventListener('blur', () => {
+      item.focused = false;
+      requestFrame();
+    });
+    link.addEventListener('dragstart', (event) => event.preventDefault());
+    link.addEventListener('pointerdown', (event) => {
+      if (
+        event.button !== 0 ||
+        event.pointerType !== 'mouse' ||
+        drag ||
+        contextLost
+      )
+        return;
+      event.preventDefault();
+      item.suppressClick = false;
+      item.vx = item.vy = 0;
+      drag = {
+        item,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        offsetX: event.clientX - item.x,
+        offsetY: event.clientY - item.y,
+        lastX: item.x,
+        lastY: item.y,
+        lastTime: performance.now(),
+        moved: false,
+      };
+      link.setPointerCapture(event.pointerId);
+    });
+    link.addEventListener('pointermove', (event) => {
+      if (!drag || drag.item !== item || drag.pointerId !== event.pointerId)
+        return;
+      if (
+        !drag.moved &&
+        Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6
+      )
+        return;
+      if (!drag.moved) {
+        drag.moved = true;
+        link.blur();
+        item.floating = true;
+        link.classList.add('is-dragging');
+        resetButton.hidden = false;
+      }
+      event.preventDefault();
+      item.x = event.clientX - drag.offsetX;
+      item.y = event.clientY - drag.offsetY;
+      contain(item);
+      const now = performance.now();
+      const dt = Math.max((now - drag.lastTime) / 1000, 0.008);
+      item.vx =
+        0.35 * item.vx +
+        0.65 * THREE.MathUtils.clamp((item.x - drag.lastX) / dt, -1000, 1000);
+      item.vy =
+        0.35 * item.vy +
+        0.65 * THREE.MathUtils.clamp((item.y - drag.lastY) / dt, -1000, 1000);
+      drag.lastX = item.x;
+      drag.lastY = item.y;
+      drag.lastTime = now;
+      requestFrame();
+    });
+    link.addEventListener('pointerup', (event) => {
+      if (drag?.pointerId === event.pointerId) finishDrag();
+    });
+    link.addEventListener('pointercancel', () => finishDrag(true));
+    link.addEventListener('lostpointercapture', () => {
+      if (drag?.item === item) finishDrag(true);
+    });
+    link.addEventListener('click', (event) => {
+      if (item.suppressClick && event.detail !== 0) {
+        event.preventDefault();
+        item.suppressClick = false;
+      }
+    });
+  }
+  resetButton.addEventListener('click', () => {
+    finishDrag(true);
+    for (const item of objects) {
+      item.floating = false;
+      item.vx = item.vy = 0;
+    }
+    measure();
+    requestFrame();
+    resetButton.hidden = true;
+    document
+      .querySelector<HTMLButtonElement>('#motion-toggle')
+      ?.focus({ preventScroll: true });
+  });
   const resizeObserver = new ResizeObserver(() => {
     measure();
     requestFrame();
   });
-  resizeObserver.observe(container);
+  resizeObserver.observe(document.documentElement);
   const intersectionObserver = new IntersectionObserver(([entry]) => {
-    visible = entry.isIntersecting;
+    stageVisible = entry.isIntersecting;
     previous = 0;
     requestFrame();
   });
-  intersectionObserver.observe(container);
-  container.parentElement!.addEventListener('pointermove', (event) => {
-    if (!finePointer.matches || isPaused()) return;
-    const rect = container!.getBoundingClientRect();
-    pointerX = (event.clientX - rect.left) / rect.width - 0.5;
-    pointerY = (event.clientY - rect.top) / rect.height - 0.5;
+  intersectionObserver.observe(container.parentElement!);
+  window.addEventListener(
+    'scroll',
+    () => {
+      measure();
+      requestFrame();
+    },
+    { passive: true },
+  );
+  window.addEventListener('resize', () => {
+    measure();
+    requestFrame();
   });
-  container.parentElement!.addEventListener('pointerleave', () => {
-    pointerX = 0;
-    pointerY = 0;
+  window.addEventListener(
+    'pointermove',
+    (event) => {
+      if (!finePointer.matches || isPaused()) return;
+      pointerX = event.clientX / width - 0.5;
+      pointerY = event.clientY / height - 0.5;
+    },
+    { passive: true },
+  );
+  document.documentElement.addEventListener('pointerleave', () => {
+    pointerX = pointerY = 0;
+  });
+  window.addEventListener('blur', () => finishDrag(true));
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') finishDrag(true);
   });
   document.addEventListener('visibilitychange', () => {
     previous = 0;
-    requestFrame();
+    if (document.hidden) {
+      finishDrag(true);
+      cancelAnimationFrame(frame);
+      frame = 0;
+    } else requestFrame();
   });
   window.addEventListener('motionchange', () => {
     previous = 0;
+    if (isPaused()) {
+      finishDrag(true);
+      for (const item of objects) item.vx = item.vy = 0;
+    }
     requestFrame();
   });
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
+    finishDrag(true);
+    contextLost = true;
     cancelAnimationFrame(frame);
     frame = 0;
-    visible = false;
     document.documentElement.classList.remove('scene-ready');
+    resetButton.hidden = true;
+    for (const item of objects) {
+      item.link.removeAttribute('style');
+      item.floating = false;
+    }
   });
   renderer.domElement.addEventListener('webglcontextrestored', () => {
-    visible = true;
-    document.documentElement.classList.add('scene-ready');
+    contextLost = false;
+    measure();
     requestFrame();
+    document.documentElement.classList.add('scene-ready');
   });
   measure();
   draw();

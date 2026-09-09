@@ -159,3 +159,132 @@ test('stars follow the pointer and stop when motion is paused or reduced', async
     )
     .toBe('none');
 });
+
+test('icons can be thrown, remain in the viewport and reset without opening links', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  const icon = page.locator('[data-object="linkedin"]');
+  await page.evaluate(() => {
+    Object.assign(window, { linkActivations: 0 });
+    document.addEventListener('click', (event) => {
+      if ((event.target as Element).closest('[data-object]')) {
+        if (!event.defaultPrevented)
+          (window as typeof window & { linkActivations: number })
+            .linkActivations++;
+        event.preventDefault();
+      }
+    });
+  });
+  const home = (await icon.boundingBox())!;
+  await page.mouse.move(home.x + home.width / 2, home.y + home.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(1100, 220, { steps: 12 });
+  await page.mouse.up();
+  await expect(
+    page.getByRole('button', { name: 'Reset positions' }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { linkActivations: number }).linkActivations,
+    ),
+  ).toBe(0);
+  const release = (await icon.boundingBox())!;
+  await page.mouse.move(640, 890);
+  await expect
+    .poll(async () => Math.abs((await icon.boundingBox())!.x - release.x))
+    .toBeGreaterThan(4);
+  // Sample the actual link bounds while the object coasts and bounces.
+  expect(
+    await icon.evaluate(
+      (element) =>
+        new Promise<boolean>((resolve) => {
+          const end = performance.now() + 500;
+          const sample = () => {
+            const rect = element.getBoundingClientRect();
+            if (
+              rect.left < 0 ||
+              rect.top < 0 ||
+              rect.right > innerWidth ||
+              rect.bottom > innerHeight
+            )
+              return resolve(false);
+            if (performance.now() >= end) return resolve(true);
+            requestAnimationFrame(sample);
+          };
+          sample();
+        }),
+    ),
+  ).toBe(true);
+  await page.getByRole('button', { name: 'Pause motion' }).click();
+  const paused = (await icon.boundingBox())!;
+  await page.mouse.move(640, 890);
+  await expect
+    .poll(async () => (await icon.boundingBox())!.x)
+    .toBeCloseTo(paused.x, 1);
+  await page.setViewportSize({ width: 375, height: 600 });
+  await expect
+    .poll(async () => {
+      const rect = (await icon.boundingBox())!;
+      return (
+        rect.x >= 0 &&
+        rect.y >= 0 &&
+        rect.x + rect.width <= 375 &&
+        rect.y + rect.height <= 600
+      );
+    })
+    .toBe(true);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: 'Reset positions' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Reset positions' }),
+  ).toBeHidden();
+  await expect
+    .poll(async () => Math.abs((await icon.boundingBox())!.x - home.x))
+    .toBeLessThan(15);
+  await icon.click();
+  await icon.press('Enter');
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { linkActivations: number }).linkActivations,
+    ),
+  ).toBe(2);
+});
+
+test('dragged icons push their neighbours and transfer momentum', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  const source = page.locator('[data-object="linkedin"]');
+  const target = page.locator('[data-object="github"]');
+  const start = (await source.boundingBox())!;
+  const targetHome = (await target.boundingBox())!;
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    targetHome.x + targetHome.width / 2 - 20,
+    targetHome.y + targetHome.height / 2,
+    { steps: 18 },
+  );
+  await expect
+    .poll(async () => (await target.boundingBox())!.x - targetHome.x)
+    .toBeGreaterThan(35);
+  await page.mouse.up();
+  await page.mouse.move(640, 890);
+  const afterContact = (await target.boundingBox())!;
+  await expect
+    .poll(async () =>
+      Math.abs((await target.boundingBox())!.x - afterContact.x),
+    )
+    .toBeGreaterThan(8);
+  await page.getByRole('button', { name: 'Reset positions' }).click();
+  await expect
+    .poll(async () => Math.abs((await target.boundingBox())!.x - targetHome.x))
+    .toBeLessThan(15);
+});

@@ -36,4 +36,6 @@ The configuration targets the custom domain root. If switching to `thomastognacc
 - `src/scripts/scene.ts`: procedural 3D objects and animation lifecycle.
 - `src/scripts/motion.ts`: pause control, system reduced-motion support and optional local preference.
 
+With a mouse, drag an icon to throw it across the viewport. It coasts, slows down and bounces off the edges. Soft collisions transfer momentum to neighbouring icons; grabbed or keyboard-focused icons stay under your control. A simple click still opens its link; Reset positions restores the original layout. Hover or keyboard focus holds a floating icon still. Touch keeps native scrolling and link taps. Pause motion and reduced-motion preferences stop inertia as well as ambient movement.
+
 No analytics or contact form. Email uses `mailto:`. DM Sans and Manrope load from Google Fonts with local sans-serif fallbacks. Reduced motion disables animation and pointer-driven movement; navigation also works without the scene.

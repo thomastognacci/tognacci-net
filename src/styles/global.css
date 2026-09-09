@@ -240,17 +240,22 @@ h1 > span {
   min-width: 0;
   border-radius: 30px;
 }
+.social-slot {
+  height: 250px;
+}
 .object-space {
   width: 100%;
   height: 250px;
   display: grid;
   place-items: center;
 }
-.social-link.github {
-  transform: translateY(27px);
+.social-slot.github {
+  position: relative;
+  top: 27px;
 }
-.social-link.email {
-  transform: translateY(-7px);
+.social-slot.email {
+  position: relative;
+  top: -7px;
 }
 .fallback-object {
   width: 126px;
@@ -279,7 +284,8 @@ h1 > span {
   visibility: hidden;
 }
 #scene {
-  position: absolute;
+  position: fixed;
+  z-index: 2;
   inset: 0;
   pointer-events: none;
 }
@@ -316,6 +322,7 @@ h1 > span {
   top: 201px;
 }
 .hero-bottom {
+  gap: 10px;
   justify-content: flex-end;
   position: relative;
   display: flex;
@@ -324,7 +331,7 @@ h1 > span {
   border-bottom: 1px solid #a090c723;
   margin-top: 15px;
 }
-#motion-toggle {
+.motion-control {
   color: #b6aec8;
   background: none;
   border: 1px solid #a899ca26;
@@ -336,10 +343,10 @@ h1 > span {
   gap: 8px;
   align-items: center;
 }
-#motion-toggle[hidden] {
+.motion-control[hidden] {
   display: none;
 }
-#motion-toggle:hover {
+.motion-control:hover {
   border-color: #a899ca80;
   color: white;
 }
@@ -469,14 +476,15 @@ h2 span {
   .social-links {
     gap: 3px;
   }
+  .social-slot,
   .object-space {
     height: 183px;
   }
-  .social-link.github {
-    transform: translateY(20px);
+  .social-slot.github {
+    top: 20px;
   }
-  .social-link.email {
-    transform: translateY(0);
+  .social-slot.email {
+    top: 0;
   }
   .fallback-object {
     width: 76px;
@@ -535,4 +543,24 @@ h2 span {
     translate: none;
     transition: none;
   }
+}
+
+.scene-ready .social-link {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  user-select: none;
+  cursor: grab;
+  touch-action: pan-y;
+}
+.scene-ready .social-link .object-space {
+  height: 100%;
+}
+.scene-ready .social-link.is-dragging {
+  cursor: grabbing;
+}
+.hero-bottom .motion-control {
+  position: relative;
+  z-index: 4;
 }
