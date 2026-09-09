@@ -160,7 +160,7 @@ test('stars follow the pointer and stop when motion is paused or reduced', async
     .toBe('none');
 });
 
-test('icons can be thrown, remain in the viewport and reset without opening links', async ({
+test('icons can be thrown, remain in the document and reset without opening links', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -197,7 +197,7 @@ test('icons can be thrown, remain in the viewport and reset without opening link
   await expect
     .poll(async () => Math.abs((await icon.boundingBox())!.x - release.x))
     .toBeGreaterThan(4);
-  // Sample the actual link bounds while the object coasts and bounces.
+  // The link follows the same projected body hull used by wall collisions.
   expect(
     await icon.evaluate(
       (element) =>
@@ -206,10 +206,10 @@ test('icons can be thrown, remain in the viewport and reset without opening link
           const sample = () => {
             const rect = element.getBoundingClientRect();
             if (
-              rect.left < 0 ||
-              rect.top < 0 ||
-              rect.right > innerWidth ||
-              rect.bottom > innerHeight
+              rect.left < -1 ||
+              rect.top + scrollY < -1 ||
+              rect.right > document.documentElement.clientWidth + 1 ||
+              rect.bottom + scrollY > document.documentElement.scrollHeight + 1
             )
               return resolve(false);
             if (performance.now() >= end) return resolve(true);
@@ -227,15 +227,17 @@ test('icons can be thrown, remain in the viewport and reset without opening link
     .toBeCloseTo(paused.x, 1);
   await page.setViewportSize({ width: 375, height: 600 });
   await expect
-    .poll(async () => {
-      const rect = (await icon.boundingBox())!;
-      return (
-        rect.x >= 0 &&
-        rect.y >= 0 &&
-        rect.x + rect.width <= 375 &&
-        rect.y + rect.height <= 600
-      );
-    })
+    .poll(() =>
+      icon.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return (
+          rect.x >= -1 &&
+          rect.y + scrollY >= -1 &&
+          rect.right <= 376 &&
+          rect.bottom + scrollY <= document.documentElement.scrollHeight + 1
+        );
+      }),
+    )
     .toBe(true);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'Reset positions' }).click();
@@ -287,4 +289,207 @@ test('dragged icons push their neighbours and transfer momentum', async ({
   await expect
     .poll(async () => Math.abs((await target.boundingBox())!.x - targetHome.x))
     .toBeLessThan(15);
+});
+
+test('icons stay above controls and stay put after a motionless release', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  const icon = page.locator('[data-object="linkedin"]');
+  await page.getByRole('button', { name: 'Pause motion' }).click();
+  const control = (await page.locator('#motion-toggle').boundingBox())!;
+  const source = (await icon.boundingBox())!;
+  await page.mouse.move(
+    source.x + source.width / 2,
+    source.y + source.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    control.x + control.width / 2,
+    control.y + control.height / 2,
+    { steps: 12 },
+  );
+  await page.mouse.up();
+  expect(
+    await page.evaluate(
+      ({ x, y }) =>
+        document
+          .elementFromPoint(x, y)
+          ?.closest('[data-object]')
+          ?.getAttribute('data-object'),
+      { x: control.x + control.width / 2, y: control.y + control.height / 2 },
+    ),
+  ).toBe('linkedin');
+  // Use the keyboard because the icon intentionally covers the button.
+  await page.locator('#motion-toggle').focus();
+  await page.locator('#motion-toggle').press('Enter');
+  expect(
+    await icon.evaluate(
+      (element) =>
+        new Promise<boolean>((resolve) => {
+          const initial = element.getBoundingClientRect();
+          const x = initial.x + initial.width / 2;
+          const y = initial.y + initial.height / 2;
+          const end = performance.now() + 800;
+          function sample() {
+            const rect = element.getBoundingClientRect();
+            if (
+              Math.hypot(
+                rect.x + rect.width / 2 - x,
+                rect.y + rect.height / 2 - y,
+              ) > 1
+            )
+              return resolve(false);
+            if (performance.now() > end) return resolve(true);
+            requestAnimationFrame(sample);
+          }
+          sample();
+        }),
+    ),
+  ).toBe(true);
+  await expect(
+    page.getByRole('button', { name: 'Reset positions' }),
+  ).toBeVisible();
+});
+
+test('hover does not stop a thrown icon', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  const icon = page.locator('[data-object="linkedin"]');
+  const start = (await icon.boundingBox())!;
+  // Grab below centre so this path also exercises gesture-derived spin.
+  await page.mouse.move(
+    start.x + start.width / 2,
+    start.y + start.height * 0.7,
+  );
+  await page.mouse.down();
+  await page.mouse.move(850, 200, { steps: 10 });
+  // Dispatch the final move and release in one browser task so a slow software
+  // renderer cannot turn the throw into an intentionally motionless release.
+  await icon.evaluate((element) => {
+    for (const type of ['pointermove', 'pointerup'])
+      element.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          button: 0,
+          buttons: type === 'pointermove' ? 1 : 0,
+          clientX: 860,
+          clientY: 200,
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+  });
+  await page.mouse.up();
+  const released = (await icon.boundingBox())!;
+  await page.mouse.move(
+    released.x + released.width / 2,
+    released.y + released.height / 2,
+  );
+  const hovered = (await icon.boundingBox())!;
+  await expect
+    .poll(async () => {
+      const current = (await icon.boundingBox())!;
+      return Math.hypot(
+        current.x + current.width / 2 - (hovered.x + hovered.width / 2),
+        current.y + current.height / 2 - (hovered.y + hovered.height / 2),
+      );
+    })
+    .toBeGreaterThan(8);
+});
+
+test('displaced icons remain anchored to the document during scrolling', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  await page.getByRole('button', { name: 'Pause motion' }).click();
+  const icon = page.locator('[data-object="linkedin"]');
+  const start = (await icon.boundingBox())!;
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(300, 180, { steps: 10 });
+  await page.mouse.up();
+  await expect(
+    page.getByRole('button', { name: 'Reset positions' }),
+  ).toBeVisible();
+  const documentY = await icon.evaluate(
+    (element) => element.getBoundingClientRect().y + scrollY,
+  );
+  await page.evaluate(() => window.scrollTo({ top: 350, behavior: 'instant' }));
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(200);
+  await expect
+    .poll(() =>
+      icon.evaluate((element) => element.getBoundingClientRect().y + scrollY),
+    )
+    .toBeCloseTo(documentY, 0);
+  expect((await icon.boundingBox())!.y).toBeLessThan(documentY - 200);
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await expect
+    .poll(() => icon.evaluate((element) => element.getBoundingClientRect().y))
+    .toBeCloseTo(documentY, 0);
+});
+
+test('the bottom wall is the stable bottom of the full document', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  await page.getByRole('button', { name: 'Pause motion' }).click();
+  const icon = page.locator('[data-object="linkedin"]');
+  const start = (await icon.boundingBox())!;
+  const initialHeight = await page.evaluate(
+    () => document.documentElement.scrollHeight,
+  );
+
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.evaluate(() =>
+    window.scrollTo({ top: 10_000, behavior: 'instant' }),
+  );
+  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(500);
+  await icon.evaluate((element) => {
+    for (const type of ['pointermove', 'pointerup'])
+      element.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          button: 0,
+          buttons: type === 'pointermove' ? 1 : 0,
+          clientX: 640,
+          clientY: 10_000,
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+  });
+  await page.mouse.up();
+  // Finish with an in-viewport drag so every browser delivers the wall contact;
+  // coordinates outside the viewport may be clipped by the automation driver.
+  const nearBottom = (await icon.boundingBox())!;
+  await page.mouse.move(
+    nearBottom.x + nearBottom.width / 2,
+    nearBottom.y + nearBottom.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(640, 719, { steps: 6 });
+  await page.mouse.up();
+
+  await expect
+    .poll(() =>
+      icon.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return Math.abs(
+          rect.bottom + scrollY - document.documentElement.scrollHeight,
+        );
+      }),
+    )
+    .toBeLessThan(1);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(
+    initialHeight,
+  );
 });

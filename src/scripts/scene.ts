@@ -1,4 +1,5 @@
 import { convexHull, getContact, type Point2 } from './collision';
+import { angularVelocityFromThrow } from './throw-motion';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
@@ -170,8 +171,6 @@ export function createScene(isPaused: () => boolean) {
       link,
       index,
       slot: link.closest<HTMLElement>('.social-slot')!,
-      localBounds: new THREE.Box3().setFromObject(group),
-      hover: false,
       focused: false,
       floating: false,
       suppressClick: false,
@@ -181,9 +180,15 @@ export function createScene(isPaused: () => boolean) {
       homeY: 0,
       vx: 0,
       vy: 0,
+      angle: 0,
+      angularVelocity: 0,
       scale: 1,
       halfWidth: 100,
       halfHeight: 100,
+      hullMinX: -100,
+      hullMaxX: 100,
+      hullMinY: -100,
+      hullMaxY: 100,
     };
   });
   type Item = (typeof objects)[number];
@@ -207,17 +212,15 @@ export function createScene(isPaused: () => boolean) {
   let previous = 0;
   let width = 0;
   let height = 0;
+  let documentHeight = 0;
   let pointerX = 0;
   let pointerY = 0;
   const finePointer = window.matchMedia('(pointer: fine)');
-  const transformedBounds = new THREE.Box3();
-  const size = new THREE.Vector3();
-
   function contain(item: Item, bounce = false) {
-    const left = item.halfWidth + 10;
-    const right = Math.max(left, width - left);
-    const top = item.halfHeight + 10;
-    const bottom = Math.max(top, height - top);
+    const left = -item.hullMinX;
+    const right = Math.max(left, width - item.hullMaxX);
+    const top = -item.hullMinY;
+    const bottom = Math.max(top, documentHeight - item.hullMaxY);
     if (item.x < left || item.x > right) {
       item.x = THREE.MathUtils.clamp(item.x, left, right);
       if (bounce)
@@ -235,8 +238,7 @@ export function createScene(isPaused: () => boolean) {
   }
 
   function resolveCollisions() {
-    const held = (item: Item) =>
-      drag?.item === item || item.hover || item.focused;
+    const held = (item: Item) => drag?.item === item || item.focused;
     // A few passes settle chains of contacts, including contacts near a wall.
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 0; i < objects.length; i++) {
@@ -249,8 +251,8 @@ export function createScene(isPaused: () => boolean) {
             [a, b].some(
               (item) =>
                 !item.floating &&
-                (item.y + item.halfHeight < 0 ||
-                  item.y - item.halfHeight > height),
+                (item.y + item.halfHeight < scrollY ||
+                  item.y - item.halfHeight > scrollY + height),
             )
           )
             continue;
@@ -311,15 +313,20 @@ export function createScene(isPaused: () => boolean) {
     for (const item of objects) {
       const { group, index } = item;
       const phase = elapsed * 0.7 + index * 2.1;
+      if (item.floating && !paused && drag?.item !== item && !item.focused) {
+        item.angularVelocity *= Math.exp(-1.4 * dt);
+        if (Math.abs(item.angularVelocity) < 0.01) item.angularVelocity = 0;
+        item.angle += item.angularVelocity * dt;
+      }
       group.position.set(0, 0, 0);
       group.rotation.set(
         0.13 + Math.sin(phase * 0.7) * 0.05 + (paused ? 0 : pointerY * 0.07),
         baseRotationY[index] +
           Math.cos(phase * 0.8) * 0.09 +
           (paused ? 0 : pointerX * 0.12),
-        baseRotationZ[index] + Math.sin(phase) * 0.045,
+        baseRotationZ[index] + Math.sin(phase) * 0.045 + item.angle,
       );
-      group.scale.setScalar(item.scale * (item.hover && !paused ? 1.04 : 1));
+      group.scale.setScalar(item.scale);
       group.updateMatrix();
       const matrix = group.matrix.elements;
       item.hull = convexHull(
@@ -337,20 +344,22 @@ export function createScene(isPaused: () => boolean) {
             ) * 100,
         })),
       );
-      transformedBounds
-        .copy(item.localBounds)
-        .applyMatrix4(group.matrix)
-        .getSize(size);
-      item.halfWidth = size.x * 50 + 3;
-      item.halfHeight = size.y * 50 + 3;
+      item.hullMinX = Math.min(...item.hull.map(({ x }) => x));
+      item.hullMaxX = Math.max(...item.hull.map(({ x }) => x));
+      item.hullMinY = Math.min(...item.hull.map(({ y }) => y));
+      item.hullMaxY = Math.max(...item.hull.map(({ y }) => y));
+      // The broad phase measures from the mesh origin, so retain the farther
+      // extent when a projected hull is asymmetric.
+      item.halfWidth = Math.max(-item.hullMinX, item.hullMaxX);
+      item.halfHeight = Math.max(-item.hullMinY, item.hullMaxY);
       if (item.floating) {
-        if (!paused && drag?.item !== item && !item.hover && !item.focused) {
-          item.x += item.vx * dt;
-          item.y += item.vy * dt;
+        if (!paused && drag?.item !== item && !item.focused) {
           const damping = Math.exp(-0.55 * dt);
           item.vx *= damping;
           item.vy *= damping;
           if (Math.hypot(item.vx, item.vy) < 2) item.vx = item.vy = 0;
+          item.x += item.vx * dt;
+          item.y += item.vy * dt;
         }
         contain(item, true);
       } else {
@@ -362,14 +371,16 @@ export function createScene(isPaused: () => boolean) {
     for (const item of objects) {
       item.group.position.set(
         (item.x - width / 2) / 100,
-        (height / 2 - item.y) / 100,
+        (height / 2 - (item.y - scrollY)) / 100,
         0,
       );
       // The real HTML link travels with the mesh; keyboard navigation stays native.
-      item.link.style.width = `${item.halfWidth * 2}px`;
-      item.link.style.height = `${item.halfHeight * 2}px`;
-      item.link.style.transform = `translate3d(${item.x - item.halfWidth}px, ${item.y - item.halfHeight}px, 0)`;
+      item.link.style.width = `${item.hullMaxX - item.hullMinX}px`;
+      item.link.style.height = `${item.hullMaxY - item.hullMinY}px`;
+      item.link.style.transform = `translate3d(${item.x + item.hullMinX}px, ${item.y - scrollY + item.hullMinY}px, 0)`;
     }
+    if (!objects.some((item) => item.floating))
+      resetButton?.setAttribute('hidden', '');
     renderer.render(scene, camera);
     if (
       !paused &&
@@ -389,6 +400,7 @@ export function createScene(isPaused: () => boolean) {
       renderer.setSize(nextWidth, nextHeight);
     width = nextWidth;
     height = nextHeight;
+    documentHeight = document.documentElement.scrollHeight;
     camera.left = -width / 200;
     camera.right = width / 200;
     camera.top = height / 200;
@@ -397,7 +409,7 @@ export function createScene(isPaused: () => boolean) {
     for (const item of objects) {
       const rect = item.slot.getBoundingClientRect();
       item.homeX = rect.left + rect.width / 2;
-      item.homeY = rect.top + rect.height / 2;
+      item.homeY = rect.top + scrollY + rect.height / 2;
       item.scale = Math.min(1, rect.width / 240, width / 280, height / 280);
     }
   }
@@ -407,28 +419,31 @@ export function createScene(isPaused: () => boolean) {
     drag = null;
     item.link.classList.remove('is-dragging');
     item.suppressClick = moved;
-    if (cancelled || isPaused() || performance.now() - lastTime > 120)
+    if (cancelled || isPaused() || performance.now() - lastTime > 120) {
       item.vx = item.vy = 0;
+      item.angularVelocity = 0;
+    }
     if (item.link.hasPointerCapture(pointerId))
       item.link.releasePointerCapture(pointerId);
-    // Pointer capture can leave :hover on the released link until the next move.
-    item.hover = false;
     requestFrame();
   }
 
   for (const item of objects) {
     const { link } = item;
-    link.addEventListener('pointerenter', () => {
-      item.hover = true;
-      requestFrame();
-    });
-    link.addEventListener('pointerleave', () => {
-      item.hover = false;
-      requestFrame();
-    });
     link.addEventListener('focus', () => {
       item.focused = true;
-      if (!item.floating) {
+      if (item.floating) {
+        if (
+          item.y - item.halfHeight < scrollY ||
+          item.y + item.halfHeight > scrollY + height
+        ) {
+          window.scrollTo({
+            top: Math.max(0, item.y - height / 2),
+            behavior: 'instant',
+          });
+          measure();
+        }
+      } else {
         const rect = item.slot.getBoundingClientRect();
         if (rect.top < 0 || rect.bottom > height) {
           item.slot.scrollIntoView({ block: 'center', behavior: 'instant' });
@@ -453,13 +468,14 @@ export function createScene(isPaused: () => boolean) {
       event.preventDefault();
       item.suppressClick = false;
       item.vx = item.vy = 0;
+      item.angularVelocity = 0;
       drag = {
         item,
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
         offsetX: event.clientX - item.x,
-        offsetY: event.clientY - item.y,
+        offsetY: event.clientY + scrollY - item.y,
         lastX: item.x,
         lastY: item.y,
         lastTime: performance.now(),
@@ -484,7 +500,7 @@ export function createScene(isPaused: () => boolean) {
       }
       event.preventDefault();
       item.x = event.clientX - drag.offsetX;
-      item.y = event.clientY - drag.offsetY;
+      item.y = event.clientY + scrollY - drag.offsetY;
       contain(item);
       const now = performance.now();
       const dt = Math.max((now - drag.lastTime) / 1000, 0.008);
@@ -494,6 +510,15 @@ export function createScene(isPaused: () => boolean) {
       item.vy =
         0.35 * item.vy +
         0.65 * THREE.MathUtils.clamp((item.y - drag.lastY) / dt, -1000, 1000);
+      item.angularVelocity =
+        0.35 * item.angularVelocity +
+        0.65 *
+          angularVelocityFromThrow(
+            drag.offsetX,
+            drag.offsetY,
+            item.vx,
+            item.vy,
+          );
       drag.lastX = item.x;
       drag.lastY = item.y;
       drag.lastTime = now;
@@ -518,6 +543,7 @@ export function createScene(isPaused: () => boolean) {
     for (const item of objects) {
       item.floating = false;
       item.vx = item.vy = 0;
+      item.angle = item.angularVelocity = 0;
     }
     measure();
     requestFrame();
@@ -577,7 +603,10 @@ export function createScene(isPaused: () => boolean) {
     previous = 0;
     if (isPaused()) {
       finishDrag(true);
-      for (const item of objects) item.vx = item.vy = 0;
+      for (const item of objects) {
+        item.vx = item.vy = 0;
+        item.angularVelocity = 0;
+      }
     }
     requestFrame();
   });
@@ -592,6 +621,7 @@ export function createScene(isPaused: () => boolean) {
     for (const item of objects) {
       item.link.removeAttribute('style');
       item.floating = false;
+      item.angle = item.angularVelocity = 0;
     }
   });
   renderer.domElement.addEventListener('webglcontextrestored', () => {
