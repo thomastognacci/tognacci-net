@@ -8,7 +8,7 @@ test('renders the identity and real contact destinations without JavaScript', as
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-    'Thomas Tognacci✳',
+    'Thomas Tognacci',
   );
   await expect(page.locator('[data-object="email"]')).toHaveAttribute(
     'href',
