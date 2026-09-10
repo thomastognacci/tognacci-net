@@ -589,22 +589,6 @@ h2 span {
   }
 }
 
-@media (max-height: 700px) {
-  .hero-bottom {
-    position: fixed;
-    right: 20px;
-    bottom: calc(16px + env(safe-area-inset-bottom));
-    min-height: 0;
-    margin: 0;
-    border-bottom: 0;
-    z-index: 4;
-    pointer-events: none;
-  }
-  .hero-bottom .motion-control {
-    pointer-events: auto;
-  }
-}
-
 .scene-ready .social-link {
   position: fixed;
   top: 0;
