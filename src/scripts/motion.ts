@@ -1,6 +1,15 @@
 export function initMotion() {
   const button = document.querySelector<HTMLButtonElement>('#motion-toggle');
   if (!button) return;
+  const mobileStatic = window.matchMedia('(hover: none) and (pointer: coarse)');
+  if (mobileStatic.matches) {
+    document.documentElement.classList.add('mobile-static');
+    button.hidden = true;
+    document
+      .querySelector<HTMLButtonElement>('#reset-positions')
+      ?.setAttribute('hidden', '');
+    return;
+  }
   const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
   let manuallyPaused = false;
   try {

@@ -458,14 +458,10 @@ export function createScene(isPaused: () => boolean) {
     });
     link.addEventListener('dragstart', (event) => event.preventDefault());
     link.addEventListener('pointerdown', (event) => {
-      if (
-        event.button !== 0 ||
-        event.pointerType !== 'mouse' ||
-        drag ||
-        contextLost
-      )
-        return;
-      event.preventDefault();
+      if (event.button !== 0 || drag || contextLost) return;
+      // WebKit needs the default touch start to synthesize a link click on tap.
+      // CSS touch-action reserves drags without cancelling that activation.
+      if (event.pointerType === 'mouse') event.preventDefault();
       item.suppressClick = false;
       item.vx = item.vy = 0;
       item.angularVelocity = 0;
@@ -527,7 +523,9 @@ export function createScene(isPaused: () => boolean) {
     link.addEventListener('pointerup', (event) => {
       if (drag?.pointerId === event.pointerId) finishDrag();
     });
-    link.addEventListener('pointercancel', () => finishDrag(true));
+    link.addEventListener('pointercancel', (event) => {
+      if (drag?.pointerId === event.pointerId) finishDrag(true);
+    });
     link.addEventListener('lostpointercapture', () => {
       if (drag?.item === item) finishDrag(true);
     });
@@ -565,10 +563,9 @@ export function createScene(isPaused: () => boolean) {
   intersectionObserver.observe(container.parentElement!);
   window.addEventListener(
     'scroll',
-    () => {
-      measure();
-      requestFrame();
-    },
+    // Scroll changes viewport coordinates, not document-space homes or sizes.
+    // Keep layout reads and canvas resizing in the resize paths.
+    requestFrame,
     { passive: true },
   );
   window.addEventListener('resize', () => {

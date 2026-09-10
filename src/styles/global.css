@@ -148,6 +148,18 @@ nav {
   font-size: 12px;
   color: #bcb7d0;
 }
+.header-socials {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.header-social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+}
 nav a:hover {
   color: white;
 }
@@ -269,6 +281,15 @@ h1 > span {
   font-weight: 700;
   transform: rotate(-12deg);
   color: white;
+}
+.mobile-static-object {
+  display: none;
+}
+.mobile-static-object img {
+  display: block;
+  width: 126px;
+  height: 126px;
+  object-fit: contain;
 }
 .github .fallback-object {
   background: linear-gradient(135deg, #cea8ff, #7740c5);
@@ -440,7 +461,7 @@ h2 span {
     display: none;
   }
   nav {
-    gap: 22px;
+    gap: 10px;
     font-size: 11px;
   }
   .hero {
@@ -490,6 +511,10 @@ h2 span {
     border-radius: 22px;
     font-size: 37px;
   }
+  .mobile-static-object img {
+    width: 100px;
+    height: 100px;
+  }
   .orbit-ring {
     top: 44px;
     height: 150px;
@@ -532,6 +557,36 @@ h2 span {
     height: 950px;
   }
 }
+
+@media (hover: none) and (pointer: coarse) {
+  .starfield {
+    animation: none;
+    translate: none;
+    transition: none;
+  }
+  #scene {
+    display: none;
+  }
+  .social-link {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: auto;
+    transform: none;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: auto;
+  }
+  .mobile-static-object {
+    display: block;
+  }
+  .fallback-object {
+    display: none;
+  }
+  .motion-control {
+    display: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -550,7 +605,9 @@ h2 span {
   z-index: 6;
   user-select: none;
   cursor: grab;
-  touch-action: pan-y;
+  /* Reserve one-finger drags for the icons; allow pinch zoom and page scroll outside them. */
+  touch-action: pinch-zoom;
+  -webkit-touch-callout: none;
 }
 .scene-ready .social-link .object-space {
   height: 100%;
@@ -561,4 +618,19 @@ h2 span {
 .hero-bottom .motion-control {
   position: relative;
   z-index: 4;
+}
+
+@media (max-width: 360px) {
+  .site-header {
+    padding-inline: 16px;
+  }
+  nav {
+    gap: 6px;
+  }
+  .hello-link {
+    padding-inline: 10px;
+  }
+  .hello-link span {
+    margin-left: 6px;
+  }
 }

@@ -15,9 +15,11 @@ npm run dev
 
 ```sh
 npm run build
-npx playwright install chromium
+npx playwright install chromium webkit
 npm test
 ```
+
+Mobile coverage checks static icon links, taps and native scrolling in WebKit and Chromium. A physical iPhone is still needed to assess Safari scrolling performance.
 
 The browser suite checks contact links without JavaScript, motion preferences, keyboard focus, WebGL initialization and responsive layouts. Screenshots are saved in `test-results/`.
 

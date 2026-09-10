@@ -493,3 +493,153 @@ test('the bottom wall is the stable bottom of the full document', async ({
     initialHeight,
   );
 });
+
+test.describe('mobile touch interactions', () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  test('mobile renders static links without the scene or motion controls', async ({
+    page,
+  }) => {
+    const requests: string[] = [];
+    page.on('request', (request) => requests.push(request.url()));
+    await page.goto('/');
+    await expect(page.locator('html')).toHaveClass(/mobile-static/);
+    await expect(page.locator('html')).not.toHaveClass(/scene-ready/);
+    await expect(page.locator('#scene canvas')).toHaveCount(0);
+    expect(requests.filter((url) => /scene/i.test(url))).toHaveLength(0);
+    await expect(page.locator('.mobile-static-object img')).toHaveCount(3);
+    await expect
+      .poll(() =>
+        page
+          .locator('.mobile-static-object img')
+          .evaluateAll((images) =>
+            images.every(
+              (image) => (image as HTMLImageElement).naturalWidth > 0,
+            ),
+          ),
+      )
+      .toBe(true);
+    await expect(page.locator('#motion-toggle')).toBeHidden();
+    await expect(page.locator('#reset-positions')).toBeHidden();
+  });
+
+  test('a mobile tap opens the link once without moving it', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.evaluate(() => document.fonts.ready);
+    const link = page.locator('[data-object="github"]');
+    const before = await link.boundingBox();
+    const popupPromise = page.waitForEvent('popup');
+    await link.tap();
+    const popup = await popupPromise;
+    await popup.close();
+    await expect.poll(async () => link.boundingBox()).toEqual(before);
+  });
+
+  test('a native touch swipe starting on an icon scrolls without moving it or opening the link', async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(
+      browserName !== 'chromium',
+      'CDP supplies the native touch swipe used by this assertion.',
+    );
+    await page.goto('/');
+    await page.evaluate(() => document.fonts.ready);
+    const icon = page.locator('[data-object="linkedin"]');
+    const start = (await icon.boundingBox())!;
+    const initialDocumentPosition = await icon.evaluate((element) => ({
+      x: element.getBoundingClientRect().x,
+      y: element.getBoundingClientRect().y + scrollY,
+    }));
+    const initialScroll = await page.evaluate(() => scrollY);
+    const popups: unknown[] = [];
+    page.on('popup', (popup) => popups.push(popup));
+    const session = await page.context().newCDPSession(page);
+    const x = start.x + start.width / 2;
+    const y = start.y + start.height / 2;
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x, y }],
+    });
+    for (let step = 1; step <= 8; step++) {
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x, y: y - step * 15 }],
+      });
+    }
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await expect
+      .poll(() => page.evaluate(() => scrollY))
+      .toBeGreaterThan(initialScroll + 50);
+    expect(popups).toHaveLength(0);
+    await expect
+      .poll(() =>
+        icon.evaluate((element) => ({
+          x: element.getBoundingClientRect().x,
+          y: element.getBoundingClientRect().y + scrollY,
+        })),
+      )
+      .toEqual(initialDocumentPosition);
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
+    const popupPromise = page.waitForEvent('popup');
+    await icon.tap();
+    await (await popupPromise).close();
+  });
+
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 844, height: 390 },
+    { width: 375, height: 667 },
+  ]) {
+    test(`native scrolling keeps icon document positions at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto('/');
+      await page.evaluate(() => document.fonts.ready);
+      const positions = await page
+        .locator('[data-object]')
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { x: rect.x, y: rect.y + scrollY };
+          }),
+        );
+      await page.evaluate(() =>
+        window.scrollTo({ top: 250, behavior: 'instant' }),
+      );
+      await expect
+        .poll(() => page.evaluate(() => scrollY))
+        .toBeGreaterThan(100);
+      const afterScroll = await page
+        .locator('[data-object]')
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { x: rect.x, y: rect.y + scrollY };
+          }),
+        );
+      expect(afterScroll).toHaveLength(positions.length);
+      afterScroll.forEach((position, index) => {
+        expect(position.x).toBeCloseTo(positions[index].x, 0);
+        expect(position.y).toBeCloseTo(positions[index].y, 0);
+      });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+    });
+  }
+});
