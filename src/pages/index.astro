@@ -1,6 +1,11 @@
 ---
 import '../styles/global.css';
 
+const title = 'Thomas Tognacci — Front-end Lead & Software Engineer';
+const description =
+  'Thomas Tognacci, front-end lead and software engineer based in Nice, France. React and TypeScript expertise, with back-end and DevOps experience.';
+const canonicalURL = new URL('/', Astro.site!).href;
+
 const links = [
   {
     id: 'linkedin',
@@ -21,6 +26,45 @@ const links = [
     fallback: '✉',
   },
 ];
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebSite',
+      '@id': `${canonicalURL}#website`,
+      url: canonicalURL,
+      name: 'Thomas Tognacci',
+      inLanguage: 'en',
+    },
+    {
+      '@type': 'ProfilePage',
+      '@id': `${canonicalURL}#profile`,
+      url: canonicalURL,
+      name: title,
+      description,
+      inLanguage: 'en',
+      isPartOf: { '@id': `${canonicalURL}#website` },
+      mainEntity: {
+        '@type': 'Person',
+        '@id': `${canonicalURL}#person`,
+        name: 'Thomas Tognacci',
+        url: canonicalURL,
+        jobTitle: 'Front-end Lead & Software Engineer',
+        homeLocation: { '@type': 'Place', name: 'Nice, France' },
+        knowsAbout: [
+          'React',
+          'TypeScript',
+          'Front-end development',
+          'DevOps',
+          'Back-end development',
+        ],
+        sameAs: links
+          .filter((link) => link.id !== 'email')
+          .map((link) => link.href),
+      },
+    },
+  ],
+};
 // Deterministic positions keep the static page identical between builds.
 const stars = Array.from({ length: 95 }, (_, i) => ({
   x: (i * 61.8034) % 100,
@@ -36,23 +80,29 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#0b0c1c" />
-    <title>Thomas Tognacci — Software Engineer · Front-end Lover</title>
-    <meta
-      name="description"
-      content="Software Engineer and Front-end Lead. Front-end expertise, full-stack curiosity. Get to know Thomas Tognacci and explore his work on GitHub."
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;550;600;700&family=Manrope:wght@500;800&display=swap"
     />
-    <link rel="canonical" href={Astro.site} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta property="og:type" content="website" />
-    <meta
-      property="og:title"
-      content="Thomas Tognacci — Software Engineer · Front-end Lead"
-    />
-    <meta
-      property="og:description"
-      content="Front-end is my home base. I build across the stack."
-    />
-    <meta property="og:url" content={Astro.site} />
+    <meta property="og:site_name" content="Thomas Tognacci" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalURL} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify(structuredData).replace(/</g, '\\u003c')}
+    ></script>
   </head>
   <body>
     <a class="skip-link" href="#main">
@@ -86,14 +136,9 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
     <main id="main">
       <section class="hero" aria-labelledby="name">
         <div class="intro">
-          <p class="eyebrow">
-            SOFTWARE ENGINEER · FRONT-END LOVER
-          </p>
+          <p class="eyebrow">SOFTWARE ENGINEER · FRONT-END LOVER</p>
           <h1 id="name">
-            Thomas{' '}
-            <span>
-              Tognacci
-            </span>
+            Thomas <span>Tognacci</span>
           </h1>
           <p class="intro-copy">
             Front-end is my home base.
@@ -164,13 +209,17 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
           </h2>
           <div class="about-copy">
             <p>
-              I’m Thomas, a software engineer from Nice and currently a front-end lead.
-My core expertise is React and TypeScript, backed by solid DevOps and back-end experience.
-            </p>
-            <p>I enjoy working across those boundaries, connecting the interface to the systems behind it. 
+              I’m Thomas, a software engineer from Nice and currently a
+              front-end lead. My core expertise is React and TypeScript, backed
+              by solid DevOps and back-end experience.
             </p>
             <p>
-            AI has become a natural part of how I build, experiment, and learn.
+              I enjoy working across those boundaries, connecting the interface
+              to the systems behind it.
+            </p>
+            <p>
+              AI has become a natural part of how I build, experiment, and
+              learn.
             </p>
             <p class="language-note">
               French & English <span> / </span> Based in Nice, France
