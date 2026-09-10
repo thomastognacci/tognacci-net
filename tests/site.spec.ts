@@ -22,6 +22,11 @@ test('renders the identity and real contact destinations without JavaScript', as
     'href',
     'https://github.com/thomastognacci',
   );
+  await expect(page.locator('.header-social-link')).toHaveCount(3);
+  await expect(
+    page.locator('.header-social-link[href^="mailto:"]'),
+  ).toBeVisible();
+  await expect(page.locator('.hello-link')).toHaveCount(0);
   await expect(page.locator('.fallback-object').first()).toBeVisible();
   await page.getByRole('link', { name: 'About me', exact: true }).click();
   await expect(page).toHaveURL(/#about$/);
@@ -516,18 +521,36 @@ test.describe('mobile touch interactions', () => {
     const rendering = await canvas.evaluate((element: HTMLCanvasElement) => {
       const context =
         element.getContext('webgl2') ?? element.getContext('webgl');
+      const scissor = context?.getParameter(context.SCISSOR_BOX) as
+        Int32Array | undefined;
       return {
         width: element.width,
         height: element.height,
         viewportWidth: innerWidth,
         viewportHeight: innerHeight,
+        documentHeight: document.documentElement.scrollHeight,
+        contentHeight: Math.ceil(
+          Math.max(
+            document.querySelector('main')!.getBoundingClientRect().bottom,
+            document.querySelector('.universe')!.getBoundingClientRect().bottom,
+          ) + scrollY,
+        ),
+        cssHeight: element.clientHeight,
+        scissor: scissor ? Array.from(scissor) : null,
         antialias: context?.getContextAttributes()?.antialias,
       };
     });
     expect(rendering.width).toBeLessThanOrEqual(rendering.viewportWidth * 1.25);
     expect(rendering.height).toBeLessThanOrEqual(
-      rendering.viewportHeight * 1.25,
+      rendering.documentHeight * 1.25,
     );
+    expect(rendering.documentHeight).toBeLessThanOrEqual(
+      rendering.contentHeight + 1,
+    );
+    expect(rendering.cssHeight).toBe(rendering.documentHeight);
+    expect(rendering.scissor).not.toBeNull();
+    expect(rendering.scissor![2]).toBeLessThanOrEqual(rendering.width);
+    expect(rendering.scissor![3]).toBeLessThanOrEqual(rendering.height);
     expect(rendering.antialias).toBe(true);
     expect(requests.filter((url) => /\/icons\/.+\.png$/.test(url))).toEqual([]);
     await expect(page.locator('#motion-toggle')).toBeVisible();
@@ -639,6 +662,9 @@ test.describe('mobile touch interactions', () => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator('#motion-toggle')).toBeVisible();
+      const control = (await page.locator('#motion-toggle').boundingBox())!;
+      expect(control.y + control.height).toBeLessThanOrEqual(viewport.height);
       const positions = await page
         .locator('[data-object]')
         .evaluateAll((elements) =>

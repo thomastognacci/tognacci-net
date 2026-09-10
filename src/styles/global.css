@@ -104,7 +104,7 @@ button:focus-visible {
 .site-header {
   max-width: 1440px;
   margin: auto;
-  padding: 33px 64px;
+  padding: 24px 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -163,19 +163,10 @@ nav {
 nav a:hover {
   color: white;
 }
-.hello-link {
-  border: 1px solid #a798d82e;
-  padding: 10px 17px;
-  border-radius: 999px;
-}
-.hello-link span {
-  margin-left: 10px;
-  color: #d3c5ff;
-}
 .hero {
   max-width: 1200px;
   margin: auto;
-  padding: 61px 40px 0;
+  padding: 40px 40px 0;
 }
 .intro {
   text-align: center;
@@ -346,9 +337,9 @@ h1 > span {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 101px;
+  min-height: 88px;
   border-bottom: 1px solid #a090c723;
-  margin-top: 15px;
+  margin-top: 8px;
 }
 .motion-control {
   color: #b6aec8;
@@ -455,7 +446,7 @@ h2 span {
 }
 @media (max-width: 700px) {
   .site-header {
-    padding: 25px 24px;
+    padding: 18px 20px;
   }
   .wordmark-name {
     display: none;
@@ -465,7 +456,7 @@ h2 span {
     font-size: 11px;
   }
   .hero {
-    padding: 55px 20px 0;
+    padding: 30px 20px 0;
   }
   .eyebrow {
     font-size: 8px;
@@ -489,15 +480,15 @@ h2 span {
     font-size: 14px;
   }
   .orbit-stage {
-    height: 230px;
-    margin-top: 26px;
+    height: 210px;
+    margin-top: 18px;
   }
   .social-links {
     gap: 3px;
   }
   .social-slot,
   .object-space {
-    height: 183px;
+    height: 170px;
   }
   .social-slot.github {
     top: 20px;
@@ -529,8 +520,8 @@ h2 span {
     font-size: 19px;
   }
   .hero-bottom {
-    min-height: 88px;
-    margin-top: 0;
+    min-height: 72px;
+    margin-top: 4px;
   }
   .about {
     margin: 0 24px;
@@ -598,6 +589,22 @@ h2 span {
   }
 }
 
+@media (max-height: 700px) {
+  .hero-bottom {
+    position: fixed;
+    right: 20px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+    min-height: 0;
+    margin: 0;
+    border-bottom: 0;
+    z-index: 4;
+    pointer-events: none;
+  }
+  .hero-bottom .motion-control {
+    pointer-events: auto;
+  }
+}
+
 .scene-ready .social-link {
   position: fixed;
   top: 0;
@@ -611,6 +618,11 @@ h2 span {
 }
 .scene-ready.scene-mobile .social-link {
   position: absolute;
+}
+.scene-mobile #scene {
+  position: absolute;
+  inset: 0 0 auto;
+  width: 100%;
 }
 .scene-ready .social-link .object-space {
   height: 100%;

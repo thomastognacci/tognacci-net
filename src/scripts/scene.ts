@@ -178,9 +178,13 @@ function createObject(id: ObjectId, profile: RenderProfile) {
 
 export function createScene(isPaused: () => boolean) {
   const container = document.querySelector<HTMLElement>('#scene');
+  const contentElement = document.querySelector<HTMLElement>('main');
+  const backgroundElement = document.querySelector<HTMLElement>('.universe');
   const resetButton =
     document.querySelector<HTMLButtonElement>('#reset-positions');
-  if (!container || !resetButton) return false;
+  if (!container || !contentElement || !resetButton) return false;
+  const content = contentElement;
+  const stageElement = container.parentElement;
   const mobile = window.matchMedia(
     '(hover: none) and (pointer: coarse)',
   ).matches;
@@ -209,6 +213,8 @@ export function createScene(isPaused: () => boolean) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.4;
   container.appendChild(renderer.domElement);
+  document.documentElement.classList.toggle('scene-mobile', mobile);
+  if (mobile) document.body.appendChild(container);
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-4, 4, 2, -2, 0.1, 100);
   camera.position.z = 10;
@@ -263,9 +269,8 @@ export function createScene(isPaused: () => boolean) {
     // Let WebKit scroll the touch targets natively. Fixed elements whose
     // transforms are updated from scrollY can drift behind Safari's visual
     // viewport during momentum scrolling.
-    const stage = container.parentElement;
     for (const item of objects)
-      stage?.parentElement?.insertBefore(item.link, stage);
+      stageElement?.parentElement?.insertBefore(item.link, stageElement);
   }
   type Drag = {
     item: Item;
@@ -381,6 +386,7 @@ export function createScene(isPaused: () => boolean) {
     frame = 0;
     if (contextLost) return;
     const paused = isPaused();
+    const renderHeight = mobile ? documentHeight : height;
     const dt =
       !paused && previous ? Math.min((now - previous) / 1000, 0.04) : 0;
     elapsed += dt;
@@ -456,7 +462,7 @@ export function createScene(isPaused: () => boolean) {
     for (const item of objects) {
       item.group.position.set(
         (item.x - width / 2) / 100,
-        (height / 2 - (item.y - scrollY)) / 100,
+        (renderHeight / 2 - (mobile ? item.y : item.y - scrollY)) / 100,
         0,
       );
       // The real HTML link travels with the mesh; keyboard navigation stays native.
@@ -483,6 +489,21 @@ export function createScene(isPaused: () => boolean) {
       }
     }
     if (!hasFloating) resetButton?.setAttribute('hidden', '');
+    if (mobile) {
+      const visibleTop = THREE.MathUtils.clamp(
+        scrollY,
+        0,
+        Math.max(0, documentHeight - height),
+      );
+      const visibleHeight = Math.min(height, documentHeight - visibleTop);
+      renderer.setScissor(
+        0,
+        Math.floor(documentHeight - visibleTop - visibleHeight),
+        Math.ceil(width),
+        Math.ceil(visibleHeight),
+      );
+      renderer.setScissorTest(true);
+    }
     renderer.render(scene, camera);
     if (!paused && !document.hidden && (stageVisible || hasFloating))
       frame = requestAnimationFrame(draw);
@@ -494,15 +515,28 @@ export function createScene(isPaused: () => boolean) {
   function measure() {
     const nextWidth = document.documentElement.clientWidth;
     const nextHeight = innerHeight;
-    if (width !== nextWidth || height !== nextHeight)
-      renderer.setSize(nextWidth, nextHeight);
+    const contentBottom = Math.max(
+      content.getBoundingClientRect().bottom,
+      backgroundElement?.getBoundingClientRect().bottom ?? 0,
+    );
+    const nextDocumentHeight = mobile
+      ? Math.max(nextHeight, Math.ceil(contentBottom + scrollY))
+      : document.documentElement.scrollHeight;
+    const nextRenderHeight = mobile ? nextDocumentHeight : nextHeight;
+    if (
+      width !== nextWidth ||
+      height !== nextHeight ||
+      documentHeight !== nextDocumentHeight
+    )
+      renderer.setSize(nextWidth, nextRenderHeight);
     width = nextWidth;
     height = nextHeight;
-    documentHeight = document.documentElement.scrollHeight;
+    documentHeight = nextDocumentHeight;
+    if (mobile) container?.style.setProperty('height', `${documentHeight}px`);
     camera.left = -width / 200;
     camera.right = width / 200;
-    camera.top = height / 200;
-    camera.bottom = -height / 200;
+    camera.top = nextRenderHeight / 200;
+    camera.bottom = -nextRenderHeight / 200;
     camera.updateProjectionMatrix();
     for (const item of objects) {
       const rect = item.slot.getBoundingClientRect();
@@ -667,12 +701,14 @@ export function createScene(isPaused: () => boolean) {
     previous = 0;
     requestFrame();
   });
-  intersectionObserver.observe(container.parentElement!);
+  intersectionObserver.observe(stageElement!);
   window.addEventListener(
     'scroll',
-    // Scroll changes viewport coordinates, not document-space homes or sizes.
-    // Keep layout reads and canvas resizing in the resize paths.
-    requestFrame,
+    () => {
+      // Scroll changes the native document layers; keep the animation loop
+      // alive so the mesh continues rotating during the gesture.
+      requestFrame();
+    },
     { passive: true },
   );
   window.addEventListener('resize', () => {
@@ -739,7 +775,6 @@ export function createScene(isPaused: () => boolean) {
   });
   measure();
   draw();
-  document.documentElement.classList.toggle('scene-mobile', mobile);
   document.documentElement.classList.add('scene-ready');
   return true;
 }
