@@ -564,10 +564,7 @@ h2 span {
     translate: none;
     transition: none;
   }
-  #scene {
-    display: none;
-  }
-  .social-link {
+  .mobile-static .social-link {
     position: relative;
     inset: auto;
     width: 100%;
@@ -577,13 +574,16 @@ h2 span {
     touch-action: manipulation;
     user-select: auto;
   }
-  .mobile-static-object {
-    display: block;
-  }
-  .fallback-object {
+  .mobile-static #scene {
     display: none;
   }
-  .motion-control {
+  .mobile-static .mobile-static-object {
+    display: block;
+  }
+  .mobile-static .fallback-object {
+    display: none;
+  }
+  .mobile-static .motion-control {
     display: none;
   }
 }
@@ -608,6 +608,9 @@ h2 span {
   /* Reserve one-finger drags for the icons; allow pinch zoom and page scroll outside them. */
   touch-action: pinch-zoom;
   -webkit-touch-callout: none;
+}
+.scene-ready.scene-mobile .social-link {
+  position: absolute;
 }
 .scene-ready .social-link .object-space {
   height: 100%;

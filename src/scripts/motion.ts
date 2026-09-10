@@ -1,15 +1,24 @@
 export function initMotion() {
   const button = document.querySelector<HTMLButtonElement>('#motion-toggle');
   if (!button) return;
-  const mobileStatic = window.matchMedia('(hover: none) and (pointer: coarse)');
-  if (mobileStatic.matches) {
+  const mobile = window.matchMedia('(hover: none) and (pointer: coarse)');
+  const useStaticFallback = () => {
     document.documentElement.classList.add('mobile-static');
+    document.documentElement.classList.remove('scene-mobile');
+    for (const image of document.querySelectorAll<HTMLImageElement>(
+      '.mobile-static-object img[data-src]',
+    )) {
+      image.src = image.dataset.src!;
+    }
     button.hidden = true;
     document
       .querySelector<HTMLButtonElement>('#reset-positions')
       ?.setAttribute('hidden', '');
-    return;
-  }
+  };
+  window.addEventListener('scenefallback', useStaticFallback, { once: true });
+  const fallbackOnMobile = () => {
+    if (mobile.matches) useStaticFallback();
+  };
   const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
   let manuallyPaused = false;
   try {
@@ -68,7 +77,24 @@ export function initMotion() {
   preference.addEventListener('change', update);
   update();
   // Navigation and readable fallback objects do not depend on this enhancement.
+  if (mobile.matches) {
+    const probe = document.createElement('canvas');
+    let webGLAvailable = false;
+    try {
+      webGLAvailable = Boolean(
+        probe.getContext('webgl2') ?? probe.getContext('webgl'),
+      );
+    } catch {
+      webGLAvailable = false;
+    }
+    if (!webGLAvailable) {
+      fallbackOnMobile();
+      return;
+    }
+  }
   import('./scene')
-    .then(({ createScene }) => createScene(isPaused))
-    .catch(() => {});
+    .then(({ createScene }) => {
+      if (!createScene(isPaused)) fallbackOnMobile();
+    })
+    .catch(fallbackOnMobile);
 }

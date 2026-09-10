@@ -200,12 +200,9 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
                 >
                   <span class="object-space" aria-hidden="true">
                     <picture class="mobile-static-object">
-                      <source
-                        media="(hover: none) and (pointer: coarse)"
-                        srcset={`/icons/${link.id}.png`}
-                      />
                       <img
                         src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
+                        data-src={`/icons/${link.id}.png`}
                         alt=""
                         width="76"
                         height="76"
