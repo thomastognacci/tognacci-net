@@ -755,12 +755,12 @@ export function createScene(isPaused: () => boolean) {
   });
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     contextLost = false;
+    document.documentElement.classList.add('scene-ready');
     measure();
     requestFrame();
-    document.documentElement.classList.add('scene-ready');
   });
+  document.documentElement.classList.add('scene-ready');
   measure();
   draw();
-  document.documentElement.classList.add('scene-ready');
   return true;
 }
