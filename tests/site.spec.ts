@@ -22,6 +22,11 @@ test('renders the identity and real contact destinations without JavaScript', as
     'href',
     'https://github.com/thomastognacci',
   );
+  await expect(page.locator('.header-social-link')).toHaveCount(3);
+  await expect(
+    page.locator('.header-social-link[href^="mailto:"]'),
+  ).toBeVisible();
+  await expect(page.locator('.hello-link')).toHaveCount(0);
   await expect(page.locator('.fallback-object').first()).toBeVisible();
   await page.getByRole('link', { name: 'About me', exact: true }).click();
   await expect(page).toHaveURL(/#about$/);
@@ -502,30 +507,86 @@ test.describe('mobile touch interactions', () => {
     hasTouch: true,
   });
 
-  test('mobile renders static links without the scene or motion controls', async ({
+  test('mobile renders the interactive scene with a low-cost canvas', async ({
     page,
   }) => {
     const requests: string[] = [];
     page.on('request', (request) => requests.push(request.url()));
     await page.goto('/');
+    await expect(page.locator('html')).toHaveClass(/scene-ready/);
+    await expect(page.locator('html')).toHaveClass(/scene-mobile/);
+    await expect(page.locator('html')).not.toHaveClass(/mobile-static/);
+    const canvas = page.locator('#scene canvas');
+    await expect(canvas).toHaveCount(1);
+    const rendering = await canvas.evaluate((element: HTMLCanvasElement) => {
+      const context =
+        element.getContext('webgl2') ?? element.getContext('webgl');
+      const scissor = context?.getParameter(context.SCISSOR_BOX) as
+        Int32Array | undefined;
+      return {
+        width: element.width,
+        height: element.height,
+        viewportWidth: innerWidth,
+        viewportHeight: innerHeight,
+        documentHeight: document.documentElement.scrollHeight,
+        contentHeight: Math.ceil(
+          Math.max(
+            document.querySelector('main')!.getBoundingClientRect().bottom,
+            document.querySelector('.universe')!.getBoundingClientRect().bottom,
+          ) + scrollY,
+        ),
+        cssHeight: element.clientHeight,
+        scissor: scissor ? Array.from(scissor) : null,
+        antialias: context?.getContextAttributes()?.antialias,
+      };
+    });
+    expect(rendering.width).toBeLessThanOrEqual(rendering.viewportWidth * 1.25);
+    expect(rendering.height).toBeLessThanOrEqual(
+      rendering.documentHeight * 1.25,
+    );
+    expect(rendering.documentHeight).toBeLessThanOrEqual(
+      rendering.contentHeight + 1,
+    );
+    expect(rendering.cssHeight).toBe(rendering.documentHeight);
+    expect(rendering.scissor).not.toBeNull();
+    expect(rendering.scissor![2]).toBeLessThanOrEqual(rendering.width);
+    expect(rendering.scissor![3]).toBeLessThanOrEqual(rendering.height);
+    expect(rendering.antialias).toBe(true);
+    expect(requests.filter((url) => /\/icons\/.+\.png$/.test(url))).toEqual([]);
+    await expect(page.locator('#motion-toggle')).toBeVisible();
+    await expect(page.locator('#reset-positions')).toBeHidden();
+  });
+
+  test('mobile loads the static icons only when WebGL is unavailable', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const getContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (
+        this: HTMLCanvasElement,
+        type: string,
+        ...args: unknown[]
+      ) {
+        if (type.startsWith('webgl')) return null;
+        return Reflect.apply(getContext, this, [type, ...args]);
+      } as typeof getContext;
+    });
+    await page.goto('/');
     await expect(page.locator('html')).toHaveClass(/mobile-static/);
     await expect(page.locator('html')).not.toHaveClass(/scene-ready/);
     await expect(page.locator('#scene canvas')).toHaveCount(0);
-    expect(requests.filter((url) => /scene/i.test(url))).toHaveLength(0);
-    await expect(page.locator('.mobile-static-object img')).toHaveCount(3);
     await expect
       .poll(() =>
         page
           .locator('.mobile-static-object img')
           .evaluateAll((images) =>
             images.every(
-              (image) => (image as HTMLImageElement).naturalWidth > 0,
+              (image) => (image as HTMLImageElement).naturalWidth > 1,
             ),
           ),
       )
       .toBe(true);
     await expect(page.locator('#motion-toggle')).toBeHidden();
-    await expect(page.locator('#reset-positions')).toBeHidden();
   });
 
   test('a mobile tap opens the link once without moving it', async ({
@@ -542,7 +603,7 @@ test.describe('mobile touch interactions', () => {
     await expect.poll(async () => link.boundingBox()).toEqual(before);
   });
 
-  test('a native touch swipe starting on an icon scrolls without moving it or opening the link', async ({
+  test('a native touch swipe drags an icon without scrolling or opening the link', async ({
     page,
     browserName,
   }) => {
@@ -578,23 +639,16 @@ test.describe('mobile touch interactions', () => {
       type: 'touchEnd',
       touchPoints: [],
     });
-    await expect
-      .poll(() => page.evaluate(() => scrollY))
-      .toBeGreaterThan(initialScroll + 50);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(initialScroll);
     expect(popups).toHaveLength(0);
-    await expect
-      .poll(() =>
-        icon.evaluate((element) => ({
-          x: element.getBoundingClientRect().x,
-          y: element.getBoundingClientRect().y + scrollY,
-        })),
-      )
-      .toEqual(initialDocumentPosition);
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
-    await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
-    const popupPromise = page.waitForEvent('popup');
-    await icon.tap();
-    await (await popupPromise).close();
+    const finalDocumentPosition = await icon.evaluate((element) => ({
+      x: element.getBoundingClientRect().x,
+      y: element.getBoundingClientRect().y + scrollY,
+    }));
+    expect(finalDocumentPosition.y).toBeLessThan(
+      initialDocumentPosition.y - 50,
+    );
+    await expect(page.locator('#reset-positions')).toBeVisible();
   });
 
   for (const viewport of [
@@ -608,6 +662,9 @@ test.describe('mobile touch interactions', () => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator('#motion-toggle')).toBeVisible();
+      const control = (await page.locator('#motion-toggle').boundingBox())!;
+      expect(control.y + control.height).toBeLessThanOrEqual(viewport.height);
       const positions = await page
         .locator('[data-object]')
         .evaluateAll((elements) =>
@@ -622,19 +679,26 @@ test.describe('mobile touch interactions', () => {
       await expect
         .poll(() => page.evaluate(() => scrollY))
         .toBeGreaterThan(100);
-      const afterScroll = await page
-        .locator('[data-object]')
-        .evaluateAll((elements) =>
-          elements.map((element) => {
-            const rect = element.getBoundingClientRect();
-            return { x: rect.x, y: rect.y + scrollY };
-          }),
-        );
-      expect(afterScroll).toHaveLength(positions.length);
-      afterScroll.forEach((position, index) => {
-        expect(position.x).toBeCloseTo(positions[index].x, 0);
-        expect(position.y).toBeCloseTo(positions[index].y, 0);
-      });
+      await expect
+        .poll(() =>
+          page.locator('[data-object]').evaluateAll(
+            (elements, expected) =>
+              elements.length !== expected.length
+                ? Infinity
+                : Math.max(
+                    ...elements.map((element, index) => {
+                      const target = expected[index];
+                      const rect = element.getBoundingClientRect();
+                      return Math.max(
+                        Math.abs(rect.x - target.x),
+                        Math.abs(rect.y + scrollY - target.y),
+                      );
+                    }),
+                  ),
+            positions,
+          ),
+        )
+        .toBeLessThan(0.1);
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
