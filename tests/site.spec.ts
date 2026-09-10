@@ -604,14 +604,10 @@ test.describe('mobile touch interactions', () => {
     await expect.poll(async () => link.boundingBox()).toEqual(before);
   });
 
-  test('a native touch swipe drags an icon without scrolling or opening the link', async ({
+  test('a mobile drag gesture moves an icon without scrolling or opening the link', async ({
     page,
     browserName,
   }) => {
-    test.skip(
-      browserName !== 'chromium',
-      'CDP supplies the native touch swipe used by this assertion.',
-    );
     await page.goto('/');
     await page.evaluate(() => document.fonts.ready);
     const icon = page.locator('[data-object="linkedin"]');
@@ -623,32 +619,41 @@ test.describe('mobile touch interactions', () => {
     const initialScroll = await page.evaluate(() => scrollY);
     const popups: unknown[] = [];
     page.on('popup', (popup) => popups.push(popup));
-    const session = await page.context().newCDPSession(page);
     const x = start.x + start.width / 2;
     const y = start.y + start.height / 2;
-    await session.send('Input.dispatchTouchEvent', {
-      type: 'touchStart',
-      touchPoints: [{ x, y }],
-    });
-    for (let step = 1; step <= 8; step++) {
+    if (browserName === 'chromium') {
+      // Playwright exposes native touch swipes only through Chromium's CDP.
+      const session = await page.context().newCDPSession(page);
       await session.send('Input.dispatchTouchEvent', {
-        type: 'touchMove',
-        touchPoints: [{ x, y: y - step * 15 }],
+        type: 'touchStart',
+        touchPoints: [{ x, y }],
       });
+      for (let step = 1; step <= 8; step++) {
+        await session.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x, y: y - step * 15 }],
+        });
+      }
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [],
+      });
+    } else {
+      // WebKit uses trusted pointer input; the preceding test covers touch taps.
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      for (let step = 1; step <= 8; step++) {
+        await page.mouse.move(x, y - step * 15);
+      }
+      await page.mouse.up();
     }
-    await session.send('Input.dispatchTouchEvent', {
-      type: 'touchEnd',
-      touchPoints: [],
-    });
     await expect.poll(() => page.evaluate(() => scrollY)).toBe(initialScroll);
     expect(popups).toHaveLength(0);
-    const finalDocumentPosition = await icon.evaluate((element) => ({
-      x: element.getBoundingClientRect().x,
-      y: element.getBoundingClientRect().y + scrollY,
-    }));
-    expect(finalDocumentPosition.y).toBeLessThan(
-      initialDocumentPosition.y - 50,
-    );
+    await expect
+      .poll(() =>
+        icon.evaluate((element) => element.getBoundingClientRect().y + scrollY),
+      )
+      .toBeLessThan(initialDocumentPosition.y - 50);
     await expect(page.locator('#reset-positions')).toBeVisible();
   });
 
