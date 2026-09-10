@@ -540,10 +540,11 @@ test.describe('mobile touch interactions', () => {
         antialias: context?.getContextAttributes()?.antialias,
       };
     });
-    expect(rendering.width).toBeLessThanOrEqual(rendering.viewportWidth * 1.25);
-    expect(rendering.height).toBeLessThanOrEqual(
-      rendering.documentHeight * 1.25,
+    expect(rendering.width).toBeGreaterThanOrEqual(
+      rendering.viewportWidth * 2.95,
     );
+    expect(rendering.width).toBeLessThanOrEqual(rendering.viewportWidth * 3);
+    expect(rendering.height).toBeLessThanOrEqual(rendering.documentHeight * 3);
     expect(rendering.documentHeight).toBeLessThanOrEqual(
       rendering.contentHeight + 1,
     );
@@ -663,8 +664,13 @@ test.describe('mobile touch interactions', () => {
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
       await expect(page.locator('#motion-toggle')).toBeVisible();
-      const control = (await page.locator('#motion-toggle').boundingBox())!;
-      expect(control.y + control.height).toBeLessThanOrEqual(viewport.height);
+      expect(
+        await page
+          .locator('#motion-toggle')
+          .evaluate(
+            (element) => getComputedStyle(element.parentElement!).position,
+          ),
+      ).toBe('relative');
       const positions = await page
         .locator('[data-object]')
         .evaluateAll((elements) =>

@@ -87,21 +87,7 @@ function addMark(
   group.add(mark);
 }
 
-function boxCorners(width: number, height: number, depth: number) {
-  const corners: THREE.Vector3[] = [];
-  for (const x of [-width / 2, width / 2])
-    for (const y of [-height / 2, height / 2])
-      for (const z of [-depth / 2, depth / 2])
-        corners.push(new THREE.Vector3(x, y, z));
-  return corners;
-}
-
-function collisionVertices(
-  group: THREE.Group,
-  dimensions: [number, number, number],
-  profile: RenderProfile,
-) {
-  if (profile.mobile) return boxCorners(...dimensions);
+function collisionVertices(group: THREE.Group) {
   const body = group.children[0] as THREE.Mesh<THREE.BufferGeometry>;
   const positions = body.geometry.getAttribute('position');
   const unique = new Map<string, THREE.Vector3>();
@@ -141,9 +127,9 @@ function createObject(id: ObjectId, profile: RenderProfile) {
         new THREE.Mesh(
           new THREE.TubeGeometry(
             curve,
-            profile.mobile ? 12 : 30,
+            profile.mobile ? 20 : 30,
             radius,
-            profile.mobile ? 4 : 6,
+            6,
             false,
           ),
           seamMaterial,
@@ -173,7 +159,7 @@ function createObject(id: ObjectId, profile: RenderProfile) {
       0.017,
     );
   }
-  return { group, vertices: collisionVertices(group, dimensions, profile) };
+  return { group, vertices: collisionVertices(group) };
 }
 
 export function createScene(isPaused: () => boolean) {
@@ -190,16 +176,16 @@ export function createScene(isPaused: () => boolean) {
   ).matches;
   const profile: RenderProfile = {
     mobile,
-    geometrySegments: mobile ? 2 : 5,
-    curveSegments: mobile ? 6 : 16,
-    bevelSegments: mobile ? 1 : 2,
+    geometrySegments: mobile ? 4 : 5,
+    curveSegments: mobile ? 10 : 16,
+    bevelSegments: 2,
   };
   let renderer: THREE.WebGLRenderer;
   try {
     renderer = new THREE.WebGLRenderer({
       alpha: true,
-      // Keep MSAA enabled on the mobile profile; the lower render scale keeps
-      // its sample cost bounded while restoring clean icon silhouettes.
+      // Keep MSAA enabled on the mobile profile. On current iPhones this
+      // profile deliberately renders at the display's native Retina ratio.
       antialias: true,
       powerPreference: mobile ? 'high-performance' : 'low-power',
       precision: mobile ? 'mediump' : 'highp',
@@ -208,7 +194,7 @@ export function createScene(isPaused: () => boolean) {
     return false;
   }
   renderer.setPixelRatio(
-    Math.min(window.devicePixelRatio, mobile ? 1.25 : 1.75),
+    mobile ? window.devicePixelRatio : Math.min(window.devicePixelRatio, 1.75),
   );
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.4;
@@ -320,7 +306,7 @@ export function createScene(isPaused: () => boolean) {
   function resolveCollisions() {
     const held = (item: Item) => drag?.item === item || item.focused;
     // A few passes settle chains of contacts, including contacts near a wall.
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < 4; pass++) {
       for (let i = 0; i < objects.length; i++) {
         for (let j = i + 1; j < objects.length; j++) {
           const a = objects[i];
