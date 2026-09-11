@@ -31,7 +31,7 @@ test('renders the identity and real contact destinations without JavaScript', as
   await expect(
     page.locator('.header-social-link[href^="mailto:"]'),
   ).toBeVisible();
-  await expect(page.locator('.text-link')).toHaveText('thomas@tognacci.net');
+  await expect(page.locator('.text-link')).toHaveText('thomas.tognacci@gmail.com');
   await expect(page.locator('.hello-link')).toHaveCount(0);
   await expect(page.locator('.fallback-object').first()).toBeVisible();
   await page.getByRole('link', { name: 'About me', exact: true }).click();
