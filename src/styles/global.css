@@ -304,17 +304,6 @@ h1 > span {
   width: 100%;
   height: 100%;
 }
-.orbit-ring {
-  position: absolute;
-  top: 56px;
-  left: 3%;
-  width: 94%;
-  height: 230px;
-  border: 1px solid #c3a6ff10;
-  border-radius: 50%;
-  transform: rotate(-11deg);
-  pointer-events: none;
-}
 .spark {
   position: absolute;
   color: #bca6e4;
@@ -505,10 +494,6 @@ h2 span {
   .mobile-static-object img {
     width: 100px;
     height: 100px;
-  }
-  .orbit-ring {
-    top: 44px;
-    height: 150px;
   }
   .spark-one {
     top: 9px;
