@@ -84,7 +84,7 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;550;600;700&family=Manrope:wght@500;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;550;600;700&family=Manrope:wght@500;800&family=Space+Grotesk:wght@400;500&display=swap"
     />
     <title>{title}</title>
     <meta name="description" content={description} />
@@ -122,9 +122,7 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
       <a href="#" class="wordmark" aria-label="Thomas Tognacci, home">
         <span class="monogram">
           t<span>t</span>
-          <i></i>
         </span>
-        <span class="wordmark-name">THOMAS TOGNACCI</span>
       </a>
       <nav aria-label="Main navigation">
         <div class="header-socials">
@@ -175,7 +173,8 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
         <div class="intro">
           <p class="eyebrow">SOFTWARE ENGINEER · FRONT-END LOVER</p>
           <h1 id="name">
-            Thomas <span>Tognacci</span>
+            <span class="first-name">Thomas</span>{' '}
+            <span class="last-name">Tognacci</span>
           </h1>
           <p class="intro-copy">
             Front-end is my home base.
@@ -271,7 +270,7 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
               French & English <span> / </span> Based in Nice, France
             </p>
             <a class="text-link" href="mailto:thomas@tognacci.net">
-              thomas@tognacci.net <span aria-hidden="true">↗</span>
+              thomas@tognacci.net
             </a>
           </div>
         </div>

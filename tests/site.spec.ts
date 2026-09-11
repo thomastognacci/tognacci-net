@@ -23,9 +23,15 @@ test('renders the identity and real contact destinations without JavaScript', as
     'https://github.com/thomastognacci',
   );
   await expect(page.locator('.header-social-link')).toHaveCount(3);
+  await expect(page.locator('.monogram i')).toHaveCount(0);
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+    'href',
+    '/favicon.svg',
+  );
   await expect(
     page.locator('.header-social-link[href^="mailto:"]'),
   ).toBeVisible();
+  await expect(page.locator('.text-link')).toHaveText('thomas@tognacci.net');
   await expect(page.locator('.hello-link')).toHaveCount(0);
   await expect(page.locator('.fallback-object').first()).toBeVisible();
   await page.getByRole('link', { name: 'About me', exact: true }).click();
@@ -65,6 +71,12 @@ for (const width of [375, 768, 1440]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    if (width === 1440)
+      expect(
+        await page
+          .locator('.hero')
+          .evaluate((element) => getComputedStyle(element).minHeight),
+      ).toBe('0px');
     const links = page.locator('[data-object]');
     for (const link of await links.all()) {
       const bounds = await link.boundingBox();
@@ -451,13 +463,19 @@ test('the bottom wall is the stable bottom of the full document', async ({
   const initialHeight = await page.evaluate(
     () => document.documentElement.scrollHeight,
   );
+  const maxScroll = await page.evaluate(
+    () => document.documentElement.scrollHeight - innerHeight,
+  );
+  expect(maxScroll).toBeGreaterThan(0);
 
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
   await page.mouse.down();
   await page.evaluate(() =>
     window.scrollTo({ top: 10_000, behavior: 'instant' }),
   );
-  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(500);
+  await expect
+    .poll(() => page.evaluate(() => scrollY))
+    .toBeCloseTo(maxScroll, 0);
   await icon.evaluate((element) => {
     for (const type of ['pointermove', 'pointerup'])
       element.dispatchEvent(
@@ -556,6 +574,22 @@ test.describe('mobile touch interactions', () => {
     expect(requests.filter((url) => /\/icons\/.+\.png$/.test(url))).toEqual([]);
     await expect(page.locator('#motion-toggle')).toBeVisible();
     await expect(page.locator('#reset-positions')).toBeHidden();
+    const mobilePolish = await page.evaluate(() => ({
+      heroBottom: document.querySelector('.hero')!.getBoundingClientRect()
+        .bottom,
+      viewportHeight: innerHeight,
+      firstNameWeight: getComputedStyle(document.querySelector('h1')!)
+        .fontWeight,
+      lastNameWeight: getComputedStyle(document.querySelector('.last-name')!)
+        .fontWeight,
+      sparkSelection: getComputedStyle(document.querySelector('.spark')!)
+        .userSelect,
+    }));
+    expect(mobilePolish.heroBottom).toBeCloseTo(mobilePolish.viewportHeight, 0);
+    expect(Number(mobilePolish.firstNameWeight)).toBeLessThan(
+      Number(mobilePolish.lastNameWeight),
+    );
+    expect(mobilePolish.sparkSelection).toBe('none');
   });
 
   test('mobile loads the static icons only when WebGL is unavailable', async ({
