@@ -12,7 +12,7 @@ test('renders the identity and real contact destinations without JavaScript', as
   );
   await expect(page.locator('[data-object="email"]')).toHaveAttribute(
     'href',
-    'mailto:thomas@tognacci.net',
+    'mailto:thomas.tognacci@gmail.com',
   );
   await expect(page.locator('[data-object="linkedin"]')).toHaveAttribute(
     'href',
@@ -96,7 +96,7 @@ test('keeps usable fallback links when WebGL is unavailable', async ({
   await expect(page.locator('.fallback-object').first()).toBeVisible();
   await expect(page.locator('[data-object="email"]')).toHaveAttribute(
     'href',
-    'mailto:thomas@tognacci.net',
+    'mailto:thomas.tognacci@gmail.com',
   );
 });
 
