@@ -199,6 +199,22 @@ test('icons can be thrown, remain in the document and reset without opening link
   await page.mouse.move(home.x + home.width / 2, home.y + home.height / 2);
   await page.mouse.down();
   await page.mouse.move(1100, 220, { steps: 12 });
+  // Keep the final move and release together so slow CI rendering cannot
+  // make the throw stale and intentionally zero its velocity.
+  await icon.evaluate((element) => {
+    for (const type of ['pointermove', 'pointerup'])
+      element.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          button: 0,
+          buttons: type === 'pointermove' ? 1 : 0,
+          clientX: 1110,
+          clientY: 210,
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+  });
   await page.mouse.up();
   await expect(
     page.getByRole('button', { name: 'Reset positions' }),
@@ -212,7 +228,10 @@ test('icons can be thrown, remain in the document and reset without opening link
   const release = (await icon.boundingBox())!;
   await page.mouse.move(640, 890);
   await expect
-    .poll(async () => Math.abs((await icon.boundingBox())!.x - release.x))
+    .poll(async () => {
+      const current = (await icon.boundingBox())!;
+      return Math.hypot(current.x - release.x, current.y - release.y);
+    })
     .toBeGreaterThan(4);
   // The link follows the same projected body hull used by wall collisions.
   expect(
