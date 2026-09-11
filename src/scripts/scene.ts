@@ -14,9 +14,6 @@ type RenderProfile = {
   curveSegments: number;
   bevelSegments: number;
 };
-type DeviceOrientationConstructor = typeof DeviceOrientationEvent & {
-  requestPermission?: () => Promise<'granted' | 'denied'>;
-};
 
 const githubPath =
   'M16.29,0a16.29,16.29,0,0,0-5.15,31.75c.81.15,1.11-.35,1.11-.79s0-1.41,0-2.77C7.7,29.18,6.74,26,6.74,26a4.31,4.31,0,0,0-1.81-2.38c-1.48-1,.11-1,.11-1a3.42,3.42,0,0,1,2.5,1.68,3.47,3.47,0,0,0,4.74,1.35,3.48,3.48,0,0,1,1-2.18C9.7,23.08,5.9,21.68,5.9,15.44a6.3,6.3,0,0,1,1.68-4.37,5.86,5.86,0,0,1,.16-4.31s1.37-.44,4.48,1.67a15.44,15.44,0,0,1,8.16,0c3.11-2.11,4.48-1.67,4.48-1.67A5.85,5.85,0,0,1,25,11.07a6.29,6.29,0,0,1,1.67,4.37c0,6.26-3.81,7.63-7.44,8a3.89,3.89,0,0,1,1.11,3c0,2.18,0,3.93,0,4.47s.29.94,1.12.78A16.29,16.29,0,0,0,16.29,0Z';
@@ -286,90 +283,7 @@ export function createScene(isPaused: () => boolean) {
   let pointerY = 0;
   let hasInteracted = false;
   let mobileIdleStrength = mobile ? 1 : 0;
-  let tiltX = 0;
-  let tiltY = 0;
-  let targetTiltX = 0;
-  let targetTiltY = 0;
-  let orientationOriginBeta: number | null = null;
-  let orientationOriginGamma: number | null = null;
-  let orientationListening = false;
-  let orientationPermissionRequested = false;
   const finePointer = window.matchMedia('(pointer: fine)');
-
-  function handleDeviceOrientation(event: DeviceOrientationEvent) {
-    if (isPaused() || event.beta === null || event.gamma === null) return;
-    if (orientationOriginBeta === null || orientationOriginGamma === null) {
-      orientationOriginBeta = event.beta;
-      orientationOriginGamma = event.gamma;
-      return;
-    }
-    const horizontal = THREE.MathUtils.clamp(
-      (event.gamma - orientationOriginGamma) / 30,
-      -1,
-      1,
-    );
-    const vertical = THREE.MathUtils.clamp(
-      (event.beta - orientationOriginBeta) / 30,
-      -1,
-      1,
-    );
-    const screenAngle = screen.orientation?.angle ?? window.orientation ?? 0;
-    if (Math.abs(screenAngle) === 90) {
-      targetTiltX = vertical * Math.sign(screenAngle);
-      targetTiltY = -horizontal * Math.sign(screenAngle);
-    } else {
-      targetTiltX = horizontal;
-      targetTiltY = vertical;
-    }
-    requestFrame();
-  }
-
-  function listenToDeviceOrientation() {
-    if (orientationListening) return;
-    orientationListening = true;
-    window.addEventListener('deviceorientation', handleDeviceOrientation, {
-      passive: true,
-    });
-  }
-
-  function resetDeviceOrientationOrigin() {
-    orientationOriginBeta = orientationOriginGamma = null;
-    targetTiltX = targetTiltY = 0;
-  }
-
-  async function enableDeviceOrientation() {
-    if (orientationListening || orientationPermissionRequested) return;
-    const orientation = window.DeviceOrientationEvent as
-      DeviceOrientationConstructor | undefined;
-    if (!orientation) return;
-    orientationPermissionRequested = true;
-    try {
-      if (
-        typeof orientation.requestPermission !== 'function' ||
-        (await orientation.requestPermission()) === 'granted'
-      )
-        listenToDeviceOrientation();
-    } catch {
-      // Keep touch interactions working when motion access is unavailable.
-    }
-  }
-
-  if (mobile) {
-    const orientation = window.DeviceOrientationEvent as
-      DeviceOrientationConstructor | undefined;
-    if (orientation) {
-      if (typeof orientation.requestPermission !== 'function')
-        listenToDeviceOrientation();
-      window.addEventListener(
-        'orientationchange',
-        resetDeviceOrientationOrigin,
-        {
-          passive: true,
-        },
-      );
-    }
-  }
-
   function contain(item: Item, bounce = false) {
     const left = -item.hullMinX;
     const right = Math.max(left, width - item.hullMaxX);
@@ -474,11 +388,6 @@ export function createScene(isPaused: () => boolean) {
         8,
         dt,
       );
-    if (paused) tiltX = tiltY = targetTiltX = targetTiltY = 0;
-    else if (dt) {
-      tiltX = THREE.MathUtils.damp(tiltX, targetTiltX, 7, dt);
-      tiltY = THREE.MathUtils.damp(tiltY, targetTiltY, 7, dt);
-    }
     for (const item of objects) {
       const { group, index } = item;
       const phase = elapsed * 0.7 + index * 2.1;
@@ -492,15 +401,12 @@ export function createScene(isPaused: () => boolean) {
       group.rotation.set(
         0.13 +
           Math.sin(phase * 0.7) * 0.05 * idleRotationScale +
-          tiltY * 0.12 +
           (paused ? 0 : pointerY * 0.07),
         baseRotationY[index] +
           Math.cos(phase * 0.8) * 0.09 * idleRotationScale +
-          tiltX * 0.16 +
           (paused ? 0 : pointerX * 0.12),
         baseRotationZ[index] +
           Math.sin(phase) * 0.045 * idleRotationScale +
-          tiltX * -0.055 +
           item.angle,
       );
       group.scale.setScalar(item.scale);
@@ -714,7 +620,6 @@ export function createScene(isPaused: () => boolean) {
       // WebKit needs the default touch start to synthesize a link click on tap.
       // CSS touch-action reserves drags without cancelling that activation.
       if (event.pointerType === 'mouse') event.preventDefault();
-      if (mobile) void enableDeviceOrientation();
       hasInteracted = true;
       item.suppressClick = false;
       item.vx = item.vy = 0;
@@ -809,6 +714,14 @@ export function createScene(isPaused: () => boolean) {
     requestFrame();
   });
   resizeObserver.observe(document.documentElement);
+  // A late font swap can change the document height without resizing the
+  // document element. Re-measure so the absolute mobile canvas cannot retain
+  // an obsolete height and extend the page past its real content.
+  if (mobile)
+    void document.fonts.ready.then(() => {
+      measure();
+      requestFrame();
+    });
   const intersectionObserver = new IntersectionObserver(([entry]) => {
     stageVisible = entry.isIntersecting;
     previous = 0;
