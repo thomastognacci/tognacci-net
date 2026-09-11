@@ -714,6 +714,14 @@ export function createScene(isPaused: () => boolean) {
     requestFrame();
   });
   resizeObserver.observe(document.documentElement);
+  // A late font swap can change the document height without resizing the
+  // document element. Re-measure so the absolute mobile canvas cannot retain
+  // an obsolete height and extend the page past its real content.
+  if (mobile)
+    void document.fonts.ready.then(() => {
+      measure();
+      requestFrame();
+    });
   const intersectionObserver = new IntersectionObserver(([entry]) => {
     stageVisible = entry.isIntersecting;
     previous = 0;
