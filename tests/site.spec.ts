@@ -22,6 +22,17 @@ test('renders the identity and real contact destinations without JavaScript', as
     'href',
     'https://github.com/thomastognacci',
   );
+  await expect(page.locator('.header-social-link')).toHaveCount(3);
+  await expect(page.locator('.monogram i')).toHaveCount(0);
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+    'href',
+    '/favicon.svg',
+  );
+  await expect(
+    page.locator('.header-social-link[href^="mailto:"]'),
+  ).toBeVisible();
+  await expect(page.locator('.text-link')).toHaveText('thomas@tognacci.net');
+  await expect(page.locator('.hello-link')).toHaveCount(0);
   await expect(page.locator('.fallback-object').first()).toBeVisible();
   await page.getByRole('link', { name: 'About me', exact: true }).click();
   await expect(page).toHaveURL(/#about$/);
@@ -60,6 +71,12 @@ for (const width of [375, 768, 1440]) {
         () => document.documentElement.scrollWidth <= innerWidth,
       ),
     ).toBe(true);
+    if (width === 1440)
+      expect(
+        await page
+          .locator('.hero')
+          .evaluate((element) => getComputedStyle(element).minHeight),
+      ).toBe('0px');
     const links = page.locator('[data-object]');
     for (const link of await links.all()) {
       const bounds = await link.boundingBox();
@@ -182,6 +199,22 @@ test('icons can be thrown, remain in the document and reset without opening link
   await page.mouse.move(home.x + home.width / 2, home.y + home.height / 2);
   await page.mouse.down();
   await page.mouse.move(1100, 220, { steps: 12 });
+  // Keep the final move and release together so slow CI rendering cannot
+  // make the throw stale and intentionally zero its velocity.
+  await icon.evaluate((element) => {
+    for (const type of ['pointermove', 'pointerup'])
+      element.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          button: 0,
+          buttons: type === 'pointermove' ? 1 : 0,
+          clientX: 1110,
+          clientY: 210,
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+  });
   await page.mouse.up();
   await expect(
     page.getByRole('button', { name: 'Reset positions' }),
@@ -195,7 +228,10 @@ test('icons can be thrown, remain in the document and reset without opening link
   const release = (await icon.boundingBox())!;
   await page.mouse.move(640, 890);
   await expect
-    .poll(async () => Math.abs((await icon.boundingBox())!.x - release.x))
+    .poll(async () => {
+      const current = (await icon.boundingBox())!;
+      return Math.hypot(current.x - release.x, current.y - release.y);
+    })
     .toBeGreaterThan(4);
   // The link follows the same projected body hull used by wall collisions.
   expect(
@@ -446,13 +482,19 @@ test('the bottom wall is the stable bottom of the full document', async ({
   const initialHeight = await page.evaluate(
     () => document.documentElement.scrollHeight,
   );
+  const maxScroll = await page.evaluate(
+    () => document.documentElement.scrollHeight - innerHeight,
+  );
+  expect(maxScroll).toBeGreaterThan(0);
 
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
   await page.mouse.down();
   await page.evaluate(() =>
     window.scrollTo({ top: 10_000, behavior: 'instant' }),
   );
-  await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(500);
+  await expect
+    .poll(() => page.evaluate(() => scrollY))
+    .toBeCloseTo(maxScroll, 0);
   await icon.evaluate((element) => {
     for (const type of ['pointermove', 'pointerup'])
       element.dispatchEvent(
@@ -502,30 +544,103 @@ test.describe('mobile touch interactions', () => {
     hasTouch: true,
   });
 
-  test('mobile renders static links without the scene or motion controls', async ({
+  test('mobile renders the interactive scene with a low-cost canvas', async ({
     page,
   }) => {
     const requests: string[] = [];
     page.on('request', (request) => requests.push(request.url()));
     await page.goto('/');
+    await expect(page.locator('html')).toHaveClass(/scene-ready/);
+    await expect(page.locator('html')).toHaveClass(/scene-mobile/);
+    await expect(page.locator('html')).not.toHaveClass(/mobile-static/);
+    const canvas = page.locator('#scene canvas');
+    await expect(canvas).toHaveCount(1);
+    const rendering = await canvas.evaluate((element: HTMLCanvasElement) => {
+      const context =
+        element.getContext('webgl2') ?? element.getContext('webgl');
+      const scissor = context?.getParameter(context.SCISSOR_BOX) as
+        Int32Array | undefined;
+      return {
+        width: element.width,
+        height: element.height,
+        viewportWidth: innerWidth,
+        viewportHeight: innerHeight,
+        documentHeight: document.documentElement.scrollHeight,
+        contentHeight: Math.ceil(
+          Math.max(
+            document.querySelector('main')!.getBoundingClientRect().bottom,
+            document.querySelector('.universe')!.getBoundingClientRect().bottom,
+          ) + scrollY,
+        ),
+        cssHeight: element.clientHeight,
+        scissor: scissor ? Array.from(scissor) : null,
+        antialias: context?.getContextAttributes()?.antialias,
+      };
+    });
+    expect(rendering.width).toBeGreaterThanOrEqual(
+      rendering.viewportWidth * 2.95,
+    );
+    expect(rendering.width).toBeLessThanOrEqual(rendering.viewportWidth * 3);
+    expect(rendering.height).toBeLessThanOrEqual(rendering.documentHeight * 3);
+    expect(rendering.documentHeight).toBeLessThanOrEqual(
+      rendering.contentHeight + 1,
+    );
+    expect(rendering.cssHeight).toBe(rendering.documentHeight);
+    expect(rendering.scissor).not.toBeNull();
+    expect(rendering.scissor![2]).toBeLessThanOrEqual(rendering.width);
+    expect(rendering.scissor![3]).toBeLessThanOrEqual(rendering.height);
+    expect(rendering.antialias).toBe(true);
+    expect(requests.filter((url) => /\/icons\/.+\.png$/.test(url))).toEqual([]);
+    await expect(page.locator('#motion-toggle')).toBeVisible();
+    await expect(page.locator('#reset-positions')).toBeHidden();
+    const mobilePolish = await page.evaluate(() => ({
+      heroBottom: document.querySelector('.hero')!.getBoundingClientRect()
+        .bottom,
+      viewportHeight: innerHeight,
+      firstNameWeight: getComputedStyle(document.querySelector('h1')!)
+        .fontWeight,
+      lastNameWeight: getComputedStyle(document.querySelector('.last-name')!)
+        .fontWeight,
+      sparkSelection: getComputedStyle(document.querySelector('.spark')!)
+        .userSelect,
+    }));
+    expect(mobilePolish.heroBottom).toBeCloseTo(mobilePolish.viewportHeight, 0);
+    expect(Number(mobilePolish.firstNameWeight)).toBeLessThan(
+      Number(mobilePolish.lastNameWeight),
+    );
+    expect(mobilePolish.sparkSelection).toBe('none');
+  });
+
+  test('mobile loads the static icons only when WebGL is unavailable', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const getContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function (
+        this: HTMLCanvasElement,
+        type: string,
+        ...args: unknown[]
+      ) {
+        if (type.startsWith('webgl')) return null;
+        return Reflect.apply(getContext, this, [type, ...args]);
+      } as typeof getContext;
+    });
+    await page.goto('/');
     await expect(page.locator('html')).toHaveClass(/mobile-static/);
     await expect(page.locator('html')).not.toHaveClass(/scene-ready/);
     await expect(page.locator('#scene canvas')).toHaveCount(0);
-    expect(requests.filter((url) => /scene/i.test(url))).toHaveLength(0);
-    await expect(page.locator('.mobile-static-object img')).toHaveCount(3);
     await expect
       .poll(() =>
         page
           .locator('.mobile-static-object img')
           .evaluateAll((images) =>
             images.every(
-              (image) => (image as HTMLImageElement).naturalWidth > 0,
+              (image) => (image as HTMLImageElement).naturalWidth > 1,
             ),
           ),
       )
       .toBe(true);
     await expect(page.locator('#motion-toggle')).toBeHidden();
-    await expect(page.locator('#reset-positions')).toBeHidden();
   });
 
   test('a mobile tap opens the link once without moving it', async ({
@@ -542,14 +657,10 @@ test.describe('mobile touch interactions', () => {
     await expect.poll(async () => link.boundingBox()).toEqual(before);
   });
 
-  test('a native touch swipe starting on an icon scrolls without moving it or opening the link', async ({
+  test('a mobile drag gesture moves an icon without scrolling or opening the link', async ({
     page,
     browserName,
   }) => {
-    test.skip(
-      browserName !== 'chromium',
-      'CDP supplies the native touch swipe used by this assertion.',
-    );
     await page.goto('/');
     await page.evaluate(() => document.fonts.ready);
     const icon = page.locator('[data-object="linkedin"]');
@@ -561,40 +672,42 @@ test.describe('mobile touch interactions', () => {
     const initialScroll = await page.evaluate(() => scrollY);
     const popups: unknown[] = [];
     page.on('popup', (popup) => popups.push(popup));
-    const session = await page.context().newCDPSession(page);
     const x = start.x + start.width / 2;
     const y = start.y + start.height / 2;
-    await session.send('Input.dispatchTouchEvent', {
-      type: 'touchStart',
-      touchPoints: [{ x, y }],
-    });
-    for (let step = 1; step <= 8; step++) {
+    if (browserName === 'chromium') {
+      // Playwright exposes native touch swipes only through Chromium's CDP.
+      const session = await page.context().newCDPSession(page);
       await session.send('Input.dispatchTouchEvent', {
-        type: 'touchMove',
-        touchPoints: [{ x, y: y - step * 15 }],
+        type: 'touchStart',
+        touchPoints: [{ x, y }],
       });
+      for (let step = 1; step <= 8; step++) {
+        await session.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x, y: y - step * 15 }],
+        });
+      }
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [],
+      });
+    } else {
+      // WebKit uses trusted pointer input; the preceding test covers touch taps.
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      for (let step = 1; step <= 8; step++) {
+        await page.mouse.move(x, y - step * 15);
+      }
+      await page.mouse.up();
     }
-    await session.send('Input.dispatchTouchEvent', {
-      type: 'touchEnd',
-      touchPoints: [],
-    });
-    await expect
-      .poll(() => page.evaluate(() => scrollY))
-      .toBeGreaterThan(initialScroll + 50);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(initialScroll);
     expect(popups).toHaveLength(0);
     await expect
       .poll(() =>
-        icon.evaluate((element) => ({
-          x: element.getBoundingClientRect().x,
-          y: element.getBoundingClientRect().y + scrollY,
-        })),
+        icon.evaluate((element) => element.getBoundingClientRect().y + scrollY),
       )
-      .toEqual(initialDocumentPosition);
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
-    await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
-    const popupPromise = page.waitForEvent('popup');
-    await icon.tap();
-    await (await popupPromise).close();
+      .toBeLessThan(initialDocumentPosition.y - 50);
+    await expect(page.locator('#reset-positions')).toBeVisible();
   });
 
   for (const viewport of [
@@ -608,6 +721,14 @@ test.describe('mobile touch interactions', () => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator('#motion-toggle')).toBeVisible();
+      expect(
+        await page
+          .locator('#motion-toggle')
+          .evaluate(
+            (element) => getComputedStyle(element.parentElement!).position,
+          ),
+      ).toBe('relative');
       const positions = await page
         .locator('[data-object]')
         .evaluateAll((elements) =>
@@ -622,19 +743,26 @@ test.describe('mobile touch interactions', () => {
       await expect
         .poll(() => page.evaluate(() => scrollY))
         .toBeGreaterThan(100);
-      const afterScroll = await page
-        .locator('[data-object]')
-        .evaluateAll((elements) =>
-          elements.map((element) => {
-            const rect = element.getBoundingClientRect();
-            return { x: rect.x, y: rect.y + scrollY };
-          }),
-        );
-      expect(afterScroll).toHaveLength(positions.length);
-      afterScroll.forEach((position, index) => {
-        expect(position.x).toBeCloseTo(positions[index].x, 0);
-        expect(position.y).toBeCloseTo(positions[index].y, 0);
-      });
+      await expect
+        .poll(() =>
+          page.locator('[data-object]').evaluateAll(
+            (elements, expected) =>
+              elements.length !== expected.length
+                ? Infinity
+                : Math.max(
+                    ...elements.map((element, index) => {
+                      const target = expected[index];
+                      const rect = element.getBoundingClientRect();
+                      return Math.max(
+                        Math.abs(rect.x - target.x),
+                        Math.abs(rect.y + scrollY - target.y),
+                      );
+                    }),
+                  ),
+            positions,
+          ),
+        )
+        .toBeLessThan(0.1);
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,

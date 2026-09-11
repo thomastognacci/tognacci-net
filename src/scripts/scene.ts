@@ -8,11 +8,24 @@ const baseRotationY = [-0.3, 0.22, -0.2];
 const baseRotationZ = [-0.16, 0.15, -0.14];
 const svgLoader = new SVGLoader();
 type ObjectId = 'linkedin' | 'github' | 'email';
+type RenderProfile = {
+  mobile: boolean;
+  geometrySegments: number;
+  curveSegments: number;
+  bevelSegments: number;
+};
 
 const githubPath =
   'M16.29,0a16.29,16.29,0,0,0-5.15,31.75c.81.15,1.11-.35,1.11-.79s0-1.41,0-2.77C7.7,29.18,6.74,26,6.74,26a4.31,4.31,0,0,0-1.81-2.38c-1.48-1,.11-1,.11-1a3.42,3.42,0,0,1,2.5,1.68,3.47,3.47,0,0,0,4.74,1.35,3.48,3.48,0,0,1,1-2.18C9.7,23.08,5.9,21.68,5.9,15.44a6.3,6.3,0,0,1,1.68-4.37,5.86,5.86,0,0,1,.16-4.31s1.37-.44,4.48,1.67a15.44,15.44,0,0,1,8.16,0c3.11-2.11,4.48-1.67,4.48-1.67A5.85,5.85,0,0,1,25,11.07a6.29,6.29,0,0,1,1.67,4.37c0,6.26-3.81,7.63-7.44,8a3.89,3.89,0,0,1,1.11,3c0,2.18,0,3.93,0,4.47s.29.94,1.12.78A16.29,16.29,0,0,0,16.29,0Z';
 
-function material(color: string) {
+function material(color: string, profile: RenderProfile) {
+  if (profile.mobile) {
+    return new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.3,
+      metalness: 0.12,
+    });
+  }
   return new THREE.MeshPhysicalMaterial({
     color,
     roughness: 0.25,
@@ -27,11 +40,18 @@ function roundedBox(
   height: number,
   depth: number,
   color: string,
+  profile: RenderProfile,
   radius = 0.22,
 ) {
   return new THREE.Mesh(
-    new RoundedBoxGeometry(width, height, depth, 5, radius),
-    material(color),
+    new RoundedBoxGeometry(
+      width,
+      height,
+      depth,
+      profile.geometrySegments,
+      radius,
+    ),
+    material(color, profile),
   );
 }
 
@@ -40,6 +60,7 @@ function addMark(
   path: string,
   sourceSize: number,
   size: number,
+  profile: RenderProfile,
 ) {
   const parsed = svgLoader.parse(
     `<svg xmlns="http://www.w3.org/2000/svg"><path d="${path}"/></svg>`,
@@ -52,11 +73,11 @@ function addMark(
         bevelEnabled: true,
         bevelThickness: 0.2,
         bevelSize: 0.1,
-        bevelSegments: 2,
+        bevelSegments: profile.bevelSegments,
         steps: 1,
-        curveSegments: 16,
+        curveSegments: profile.curveSegments,
       }),
-      material('#f9f3ff'),
+      material('#f9f3ff', profile),
     );
     mark.add(mesh);
   }
@@ -66,28 +87,51 @@ function addMark(
   group.add(mark);
 }
 
-function createObject(id: ObjectId) {
+function collisionVertices(group: THREE.Group) {
+  const body = group.children[0] as THREE.Mesh<THREE.BufferGeometry>;
+  const positions = body.geometry.getAttribute('position');
+  const unique = new Map<string, THREE.Vector3>();
+  for (let i = 0; i < positions.count; i++) {
+    const vertex = new THREE.Vector3().fromBufferAttribute(positions, i);
+    const key = `${vertex.x.toFixed(6)},${vertex.y.toFixed(6)},${vertex.z.toFixed(6)}`;
+    unique.set(key, vertex);
+  }
+  return [...unique.values()];
+}
+
+function createObject(id: ObjectId, profile: RenderProfile) {
   const group = new THREE.Group();
+  let dimensions: [number, number, number];
   if (id === 'linkedin') {
-    group.add(roundedBox(1.62, 1.62, 0.53, '#448ce9', 0.26));
+    dimensions = [1.62, 1.62, 0.53];
+    group.add(roundedBox(...dimensions, '#448ce9', profile, 0.26));
     addMark(
       group,
       'M9 35H27V91H9Z M18 8A10 10 0 1 1 17.99 28A10 10 0 1 1 18 8 M38 35H56V43C62 29 91 29 91 55V91H73V59C73 44 56 46 56 60V91H38Z',
       100,
       1.25,
+      profile,
     );
   } else if (id === 'github') {
-    group.add(roundedBox(1.7, 1.7, 0.57, '#a774eb', 0.37));
-    addMark(group, githubPath, 32.58, 1.15);
+    dimensions = [1.7, 1.7, 0.57];
+    group.add(roundedBox(...dimensions, '#a774eb', profile, 0.37));
+    addMark(group, githubPath, 32.58, 1.15, profile);
   } else {
-    group.add(roundedBox(1.92, 1.37, 0.48, '#ffb395', 0.18));
+    dimensions = [1.92, 1.37, 0.48];
+    group.add(roundedBox(...dimensions, '#ffb395', profile, 0.18));
     // Rounded seams give the envelope a folded, tactile surface.
-    const seamMaterial = material('#db826e');
+    const seamMaterial = material('#db826e', profile);
     const seam = (points: THREE.Vector3[], radius: number) => {
       const curve = new THREE.CatmullRomCurve3(points);
       group.add(
         new THREE.Mesh(
-          new THREE.TubeGeometry(curve, 30, radius, 6, false),
+          new THREE.TubeGeometry(
+            curve,
+            profile.mobile ? 20 : 30,
+            radius,
+            6,
+            false,
+          ),
           seamMaterial,
         ),
       );
@@ -115,28 +159,48 @@ function createObject(id: ObjectId) {
       0.017,
     );
   }
-  return group;
+  return { group, vertices: collisionVertices(group) };
 }
 
 export function createScene(isPaused: () => boolean) {
   const container = document.querySelector<HTMLElement>('#scene');
+  const contentElement = document.querySelector<HTMLElement>('main');
+  const backgroundElement = document.querySelector<HTMLElement>('.universe');
   const resetButton =
     document.querySelector<HTMLButtonElement>('#reset-positions');
-  if (!container || !resetButton) return;
+  if (!container || !contentElement || !resetButton) return false;
+  const content = contentElement;
+  const stageElement = container.parentElement;
+  const mobile = window.matchMedia(
+    '(hover: none) and (pointer: coarse)',
+  ).matches;
+  const profile: RenderProfile = {
+    mobile,
+    geometrySegments: mobile ? 4 : 5,
+    curveSegments: mobile ? 10 : 16,
+    bevelSegments: 2,
+  };
   let renderer: THREE.WebGLRenderer;
   try {
     renderer = new THREE.WebGLRenderer({
       alpha: true,
+      // Keep MSAA enabled on the mobile profile. On current iPhones this
+      // profile deliberately renders at the display's native Retina ratio.
       antialias: true,
-      powerPreference: 'low-power',
+      powerPreference: mobile ? 'high-performance' : 'low-power',
+      precision: mobile ? 'mediump' : 'highp',
     });
   } catch {
-    return;
+    return false;
   }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+  renderer.setPixelRatio(
+    mobile ? window.devicePixelRatio : Math.min(window.devicePixelRatio, 1.75),
+  );
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.4;
   container.appendChild(renderer.domElement);
+  document.documentElement.classList.toggle('scene-mobile', mobile);
+  if (mobile) document.body.appendChild(container);
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-4, 4, 2, -2, 0.1, 100);
   camera.position.z = 10;
@@ -154,19 +218,11 @@ export function createScene(isPaused: () => boolean) {
     const id = link.dataset.object;
     if (id !== 'linkedin' && id !== 'github' && id !== 'email')
       throw new Error('Unknown social object');
-    const group = createObject(id);
+    const { group, vertices } = createObject(id, profile);
     scene.add(group);
-    const body = group.children[0] as THREE.Mesh<THREE.BufferGeometry>;
-    const positions = body.geometry.getAttribute('position');
-    const unique = new Map<string, THREE.Vector3>();
-    for (let i = 0; i < positions.count; i++) {
-      const vertex = new THREE.Vector3().fromBufferAttribute(positions, i);
-      const key = `${vertex.x.toFixed(6)},${vertex.y.toFixed(6)},${vertex.z.toFixed(6)}`;
-      unique.set(key, vertex);
-    }
     return {
       group,
-      vertices: [...unique.values()],
+      vertices,
       hull: [] as Point2[],
       link,
       index,
@@ -189,9 +245,19 @@ export function createScene(isPaused: () => boolean) {
       hullMaxX: 100,
       hullMinY: -100,
       hullMaxY: 100,
+      linkX: NaN,
+      linkY: NaN,
+      linkSize: NaN,
     };
   });
   type Item = (typeof objects)[number];
+  if (mobile) {
+    // Let WebKit scroll the touch targets natively. Fixed elements whose
+    // transforms are updated from scrollY can drift behind Safari's visual
+    // viewport during momentum scrolling.
+    for (const item of objects)
+      stageElement?.parentElement?.insertBefore(item.link, stageElement);
+  }
   type Drag = {
     item: Item;
     pointerId: number;
@@ -215,6 +281,8 @@ export function createScene(isPaused: () => boolean) {
   let documentHeight = 0;
   let pointerX = 0;
   let pointerY = 0;
+  let hasInteracted = false;
+  let mobileIdleStrength = mobile ? 1 : 0;
   const finePointer = window.matchMedia('(pointer: fine)');
   function contain(item: Item, bounce = false) {
     const left = -item.hullMinX;
@@ -240,7 +308,7 @@ export function createScene(isPaused: () => boolean) {
   function resolveCollisions() {
     const held = (item: Item) => drag?.item === item || item.focused;
     // A few passes settle chains of contacts, including contacts near a wall.
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < 4; pass++) {
       for (let i = 0; i < objects.length; i++) {
         for (let j = i + 1; j < objects.length; j++) {
           const a = objects[i];
@@ -306,13 +374,24 @@ export function createScene(isPaused: () => boolean) {
     frame = 0;
     if (contextLost) return;
     const paused = isPaused();
+    const renderHeight = mobile ? documentHeight : height;
     const dt =
       !paused && previous ? Math.min((now - previous) / 1000, 0.04) : 0;
     elapsed += dt;
     previous = now;
+    const mobileIdleTarget = mobile && !paused ? (hasInteracted ? 0.25 : 1) : 0;
+    if (paused) mobileIdleStrength = 0;
+    else if (dt)
+      mobileIdleStrength = THREE.MathUtils.damp(
+        mobileIdleStrength,
+        mobileIdleTarget,
+        8,
+        dt,
+      );
     for (const item of objects) {
       const { group, index } = item;
       const phase = elapsed * 0.7 + index * 2.1;
+      const idleRotationScale = 1 + mobileIdleStrength * 0.6;
       if (item.floating && !paused && drag?.item !== item && !item.focused) {
         item.angularVelocity *= Math.exp(-1.4 * dt);
         if (Math.abs(item.angularVelocity) < 0.01) item.angularVelocity = 0;
@@ -320,11 +399,15 @@ export function createScene(isPaused: () => boolean) {
       }
       group.position.set(0, 0, 0);
       group.rotation.set(
-        0.13 + Math.sin(phase * 0.7) * 0.05 + (paused ? 0 : pointerY * 0.07),
+        0.13 +
+          Math.sin(phase * 0.7) * 0.05 * idleRotationScale +
+          (paused ? 0 : pointerY * 0.07),
         baseRotationY[index] +
-          Math.cos(phase * 0.8) * 0.09 +
+          Math.cos(phase * 0.8) * 0.09 * idleRotationScale +
           (paused ? 0 : pointerX * 0.12),
-        baseRotationZ[index] + Math.sin(phase) * 0.045 + item.angle,
+        baseRotationZ[index] +
+          Math.sin(phase) * 0.045 * idleRotationScale +
+          item.angle,
       );
       group.scale.setScalar(item.scale);
       group.updateMatrix();
@@ -344,10 +427,16 @@ export function createScene(isPaused: () => boolean) {
             ) * 100,
         })),
       );
-      item.hullMinX = Math.min(...item.hull.map(({ x }) => x));
-      item.hullMaxX = Math.max(...item.hull.map(({ x }) => x));
-      item.hullMinY = Math.min(...item.hull.map(({ y }) => y));
-      item.hullMaxY = Math.max(...item.hull.map(({ y }) => y));
+      item.hullMinX = Infinity;
+      item.hullMaxX = -Infinity;
+      item.hullMinY = Infinity;
+      item.hullMaxY = -Infinity;
+      for (const point of item.hull) {
+        item.hullMinX = Math.min(item.hullMinX, point.x);
+        item.hullMaxX = Math.max(item.hullMaxX, point.x);
+        item.hullMinY = Math.min(item.hullMinY, point.y);
+        item.hullMaxY = Math.max(item.hullMaxY, point.y);
+      }
       // The broad phase measures from the mesh origin, so retain the farther
       // extent when a projected hull is asymmetric.
       item.halfWidth = Math.max(-item.hullMinX, item.hullMaxX);
@@ -364,29 +453,76 @@ export function createScene(isPaused: () => boolean) {
         contain(item, true);
       } else {
         item.x = item.homeX;
-        item.y = item.homeY + Math.sin(phase) * 7;
+        // Keep touch targets still while the mesh itself rotates. A moving link
+        // can make WebKit cancel an otherwise valid tap.
+        item.y = item.homeY + (mobile ? 0 : Math.sin(phase) * 7);
       }
     }
-    if (!paused) resolveCollisions();
+    let hasFloating = objects.some((item) => item.floating);
+    if (!paused && hasFloating) resolveCollisions();
+    hasFloating = objects.some((item) => item.floating);
     for (const item of objects) {
+      // Give mobile meshes a zero-gravity drift: visible before discovery,
+      // subtle after interaction, and absent while an icon follows the finger.
+      // HTML hit targets stay anchored so Safari taps remain reliable.
+      const idleX =
+        mobile && drag?.item !== item
+          ? Math.cos(elapsed * 0.62 + item.index * 2.35) *
+            0.04 *
+            mobileIdleStrength
+          : 0;
+      const idleY =
+        mobile && drag?.item !== item
+          ? Math.sin(elapsed * 0.78 + item.index * 2.1) *
+            0.075 *
+            mobileIdleStrength
+          : 0;
       item.group.position.set(
-        (item.x - width / 2) / 100,
-        (height / 2 - (item.y - scrollY)) / 100,
+        (item.x - width / 2) / 100 + idleX,
+        (renderHeight / 2 - (mobile ? item.y : item.y - scrollY)) / 100 + idleY,
         0,
       );
       // The real HTML link travels with the mesh; keyboard navigation stays native.
-      item.link.style.width = `${item.hullMaxX - item.hullMinX}px`;
-      item.link.style.height = `${item.hullMaxY - item.hullMinY}px`;
-      item.link.style.transform = `translate3d(${item.x + item.hullMinX}px, ${item.y - scrollY + item.hullMinY}px, 0)`;
+      if (mobile) {
+        const hitSize = Math.max(44, item.scale * 200);
+        const linkX = item.x - hitSize / 2;
+        const linkY = item.y - hitSize / 2;
+        if (
+          item.linkX !== linkX ||
+          item.linkY !== linkY ||
+          item.linkSize !== hitSize
+        ) {
+          item.link.style.width = `${hitSize}px`;
+          item.link.style.height = `${hitSize}px`;
+          item.link.style.transform = `translate3d(${linkX}px, ${linkY}px, 0)`;
+          item.linkX = linkX;
+          item.linkY = linkY;
+          item.linkSize = hitSize;
+        }
+      } else {
+        item.link.style.width = `${item.hullMaxX - item.hullMinX}px`;
+        item.link.style.height = `${item.hullMaxY - item.hullMinY}px`;
+        item.link.style.transform = `translate3d(${item.x + item.hullMinX}px, ${item.y - scrollY + item.hullMinY}px, 0)`;
+      }
     }
-    if (!objects.some((item) => item.floating))
-      resetButton?.setAttribute('hidden', '');
+    if (!hasFloating) resetButton?.setAttribute('hidden', '');
+    if (mobile) {
+      const visibleTop = THREE.MathUtils.clamp(
+        scrollY,
+        0,
+        Math.max(0, documentHeight - height),
+      );
+      const visibleHeight = Math.min(height, documentHeight - visibleTop);
+      renderer.setScissor(
+        0,
+        Math.floor(documentHeight - visibleTop - visibleHeight),
+        Math.ceil(width),
+        Math.ceil(visibleHeight),
+      );
+      renderer.setScissorTest(true);
+    }
     renderer.render(scene, camera);
-    if (
-      !paused &&
-      !document.hidden &&
-      (stageVisible || objects.some((item) => item.floating))
-    )
+    if (!paused && !document.hidden && (stageVisible || hasFloating))
       frame = requestAnimationFrame(draw);
   }
   function requestFrame() {
@@ -396,21 +532,43 @@ export function createScene(isPaused: () => boolean) {
   function measure() {
     const nextWidth = document.documentElement.clientWidth;
     const nextHeight = innerHeight;
-    if (width !== nextWidth || height !== nextHeight)
-      renderer.setSize(nextWidth, nextHeight);
+    const contentBottom = Math.max(
+      content.getBoundingClientRect().bottom,
+      backgroundElement?.getBoundingClientRect().bottom ?? 0,
+    );
+    const nextDocumentHeight = mobile
+      ? Math.max(nextHeight, Math.ceil(contentBottom + scrollY))
+      : document.documentElement.scrollHeight;
+    const nextRenderHeight = mobile ? nextDocumentHeight : nextHeight;
+    if (
+      width !== nextWidth ||
+      height !== nextHeight ||
+      documentHeight !== nextDocumentHeight
+    )
+      renderer.setSize(nextWidth, nextRenderHeight);
     width = nextWidth;
     height = nextHeight;
-    documentHeight = document.documentElement.scrollHeight;
+    documentHeight = nextDocumentHeight;
+    if (mobile) container?.style.setProperty('height', `${documentHeight}px`);
     camera.left = -width / 200;
     camera.right = width / 200;
-    camera.top = height / 200;
-    camera.bottom = -height / 200;
+    camera.top = nextRenderHeight / 200;
+    camera.bottom = -nextRenderHeight / 200;
     camera.updateProjectionMatrix();
     for (const item of objects) {
       const rect = item.slot.getBoundingClientRect();
       item.homeX = rect.left + rect.width / 2;
       item.homeY = rect.top + scrollY + rect.height / 2;
-      item.scale = Math.min(1, rect.width / 240, width / 280, height / 280);
+      const nextScale = Math.min(
+        1,
+        rect.width / 240,
+        width / 280,
+        height / 280,
+      );
+      if (item.scale !== nextScale) {
+        item.scale = nextScale;
+        item.linkX = item.linkY = item.linkSize = NaN;
+      }
     }
   }
   function finishDrag(cancelled = false) {
@@ -462,6 +620,7 @@ export function createScene(isPaused: () => boolean) {
       // WebKit needs the default touch start to synthesize a link click on tap.
       // CSS touch-action reserves drags without cancelling that activation.
       if (event.pointerType === 'mouse') event.preventDefault();
+      hasInteracted = true;
       item.suppressClick = false;
       item.vx = item.vy = 0;
       item.angularVelocity = 0;
@@ -555,17 +714,27 @@ export function createScene(isPaused: () => boolean) {
     requestFrame();
   });
   resizeObserver.observe(document.documentElement);
+  // A late font swap can change the document height without resizing the
+  // document element. Re-measure so the absolute mobile canvas cannot retain
+  // an obsolete height and extend the page past its real content.
+  if (mobile)
+    void document.fonts.ready.then(() => {
+      measure();
+      requestFrame();
+    });
   const intersectionObserver = new IntersectionObserver(([entry]) => {
     stageVisible = entry.isIntersecting;
     previous = 0;
     requestFrame();
   });
-  intersectionObserver.observe(container.parentElement!);
+  intersectionObserver.observe(stageElement!);
   window.addEventListener(
     'scroll',
-    // Scroll changes viewport coordinates, not document-space homes or sizes.
-    // Keep layout reads and canvas resizing in the resize paths.
-    requestFrame,
+    () => {
+      // Scroll changes the native document layers; keep the animation loop
+      // alive so the mesh continues rotating during the gesture.
+      requestFrame();
+    },
     { passive: true },
   );
   window.addEventListener('resize', () => {
@@ -614,20 +783,24 @@ export function createScene(isPaused: () => boolean) {
     cancelAnimationFrame(frame);
     frame = 0;
     document.documentElement.classList.remove('scene-ready');
+    if (mobile) window.dispatchEvent(new Event('scenefallback'));
     resetButton.hidden = true;
     for (const item of objects) {
       item.link.removeAttribute('style');
+      item.linkX = item.linkY = item.linkSize = NaN;
+      if (mobile) item.slot.appendChild(item.link);
       item.floating = false;
       item.angle = item.angularVelocity = 0;
     }
   });
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     contextLost = false;
+    document.documentElement.classList.add('scene-ready');
     measure();
     requestFrame();
-    document.documentElement.classList.add('scene-ready');
   });
+  document.documentElement.classList.add('scene-ready');
   measure();
   draw();
-  document.documentElement.classList.add('scene-ready');
+  return true;
 }
