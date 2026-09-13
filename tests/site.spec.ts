@@ -590,9 +590,17 @@ test.describe('mobile touch interactions', () => {
     expect(rendering.scissor).not.toBeNull();
     expect(rendering.scissor![2]).toBeLessThanOrEqual(rendering.width);
     expect(rendering.scissor![3]).toBeLessThanOrEqual(rendering.height);
-    expect(rendering.scissor![3]).toBeGreaterThanOrEqual(
-      (rendering.viewportHeight + 96) * rendering.pixelRatio,
-    );
+    await expect
+      .poll(() =>
+        canvas.evaluate((element: HTMLCanvasElement) => {
+          const context =
+            element.getContext('webgl2') ?? element.getContext('webgl');
+          const scissor = context?.getParameter(context.SCISSOR_BOX) as
+            Int32Array | undefined;
+          return (scissor?.[3] ?? 0) / devicePixelRatio - innerHeight;
+        }),
+      )
+      .toBeGreaterThanOrEqual(96);
     const shiftedViewport = await page.evaluate(() => {
       if (!visualViewport) return null;
       const pageTop = 120;
