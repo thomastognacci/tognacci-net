@@ -6,6 +6,7 @@ import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
 const baseRotationY = [-0.3, 0.22, -0.2];
 const baseRotationZ = [-0.16, 0.15, -0.14];
+const mobileViewportOverscan = 96;
 const svgLoader = new SVGLoader();
 type ObjectId = 'linkedin' | 'github' | 'email';
 type RenderProfile = {
@@ -507,12 +508,21 @@ export function createScene(isPaused: () => boolean) {
     }
     if (!hasFloating) resetButton?.setAttribute('hidden', '');
     if (mobile) {
+      const visualTop = visualViewport?.pageTop ?? scrollY;
+      const visualBottom = visualTop + (visualViewport?.height ?? height);
+      const viewportTop = Math.min(scrollY, visualTop);
+      const viewportBottom = Math.max(scrollY + height, visualBottom);
       const visibleTop = THREE.MathUtils.clamp(
-        scrollY,
+        Math.floor(viewportTop - mobileViewportOverscan),
         0,
-        Math.max(0, documentHeight - height),
+        documentHeight,
       );
-      const visibleHeight = Math.min(height, documentHeight - visibleTop);
+      const visibleBottom = THREE.MathUtils.clamp(
+        Math.ceil(viewportBottom + mobileViewportOverscan),
+        visibleTop,
+        documentHeight,
+      );
+      const visibleHeight = visibleBottom - visibleTop;
       renderer.setScissor(
         0,
         Math.floor(documentHeight - visibleTop - visibleHeight),
@@ -741,6 +751,8 @@ export function createScene(isPaused: () => boolean) {
     measure();
     requestFrame();
   });
+  visualViewport?.addEventListener('scroll', requestFrame, { passive: true });
+  visualViewport?.addEventListener('resize', requestFrame, { passive: true });
   window.addEventListener(
     'pointermove',
     (event) => {

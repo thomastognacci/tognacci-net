@@ -565,6 +565,7 @@ test.describe('mobile touch interactions', () => {
         height: element.height,
         viewportWidth: innerWidth,
         viewportHeight: innerHeight,
+        pixelRatio: devicePixelRatio,
         documentHeight: document.documentElement.scrollHeight,
         contentHeight: Math.ceil(
           Math.max(
@@ -589,6 +590,33 @@ test.describe('mobile touch interactions', () => {
     expect(rendering.scissor).not.toBeNull();
     expect(rendering.scissor![2]).toBeLessThanOrEqual(rendering.width);
     expect(rendering.scissor![3]).toBeLessThanOrEqual(rendering.height);
+    expect(rendering.scissor![3]).toBeGreaterThanOrEqual(
+      (rendering.viewportHeight + 96) * rendering.pixelRatio,
+    );
+    const shiftedViewport = await page.evaluate(() => {
+      if (!visualViewport) return null;
+      const pageTop = 120;
+      Object.defineProperties(visualViewport, {
+        pageTop: { configurable: true, value: pageTop },
+        height: { configurable: true, value: innerHeight },
+      });
+      visualViewport.dispatchEvent(new Event('resize'));
+      return {
+        minimumScissorHeight: (pageTop + innerHeight + 96) * devicePixelRatio,
+      };
+    });
+    expect(shiftedViewport).not.toBeNull();
+    await expect
+      .poll(() =>
+        canvas.evaluate((element: HTMLCanvasElement) => {
+          const context =
+            element.getContext('webgl2') ?? element.getContext('webgl');
+          return (
+            context?.getParameter(context.SCISSOR_BOX) as Int32Array | undefined
+          )?.[3];
+        }),
+      )
+      .toBeGreaterThanOrEqual(shiftedViewport!.minimumScissorHeight);
     expect(rendering.antialias).toBe(true);
     expect(requests.filter((url) => /\/icons\/.+\.png$/.test(url))).toEqual([]);
     await expect(page.locator('#motion-toggle')).toBeVisible();
