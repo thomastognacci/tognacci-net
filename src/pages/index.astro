@@ -90,6 +90,13 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
     <meta name="description" content={description} />
     <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <noscript>
+      <style is:global>
+        .fallback-object {
+          display: grid !important;
+        }
+      </style>
+    </noscript>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Thomas Tognacci" />
     <meta property="og:title" content={title} />
@@ -221,6 +228,9 @@ const stars = Array.from({ length: 95 }, (_, i) => ({
               </div>
             ))}
           </div>
+          <p class="scene-fallback-message" role="status">
+            These icons are even more fun with WebGL enabled.
+          </p>
         </div>
         <div class="hero-bottom">
           <button
