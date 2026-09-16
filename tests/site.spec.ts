@@ -31,7 +31,9 @@ test('renders the identity and real contact destinations without JavaScript', as
   await expect(
     page.locator('.header-social-link[href^="mailto:"]'),
   ).toBeVisible();
-  await expect(page.locator('.text-link')).toHaveText('thomas.tognacci@gmail.com');
+  await expect(page.locator('.text-link')).toHaveText(
+    'thomas.tognacci@gmail.com',
+  );
   await expect(page.locator('.hello-link')).toHaveCount(0);
   await expect(page.locator('.fallback-object').first()).toBeVisible();
   await page.getByRole('link', { name: 'About me', exact: true }).click();
@@ -107,14 +109,47 @@ test('keeps usable fallback links when WebGL is unavailable', async ({
     } as typeof getContext;
   });
   await page.goto('/');
-  await expect(
-    page.getByRole('button', { name: 'Pause motion' }),
-  ).toBeVisible();
-  await expect(page.locator('.fallback-object').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Pause motion' })).toBeHidden();
+  await expect(page.locator('html')).toHaveClass(/scene-fallback/);
+  await expect(page.locator('.fallback-object').first()).toBeHidden();
+  await expect
+    .poll(() =>
+      page
+        .locator('.mobile-static-object img')
+        .evaluateAll((images) =>
+          images.every((image) => (image as HTMLImageElement).naturalWidth > 1),
+        ),
+    )
+    .toBe(true);
+  await expect(page.getByRole('status')).toContainText('WebGL enabled');
   await expect(page.locator('[data-object="email"]')).toHaveAttribute(
     'href',
     'mailto:thomas.tognacci@gmail.com',
   );
+});
+
+test('does not show fallback placeholders while the 3D scene is loading', async ({
+  page,
+}) => {
+  let releaseScene!: () => void;
+  let sceneRequested!: () => void;
+  const sceneRequest = new Promise<void>((resolve) => {
+    sceneRequested = resolve;
+  });
+  const release = new Promise<void>((resolve) => {
+    releaseScene = resolve;
+  });
+  await page.route(/\/scene\.[^/]+\.js$/, async (route) => {
+    sceneRequested();
+    await release;
+    await route.continue();
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await sceneRequest;
+  await expect(page.locator('html')).not.toHaveClass(/scene-ready/);
+  await expect(page.locator('.fallback-object').first()).toBeHidden();
+  releaseScene();
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
 });
 
 test('uses only one animation loop and pauses it', async ({ page }) => {
@@ -135,12 +170,64 @@ test('uses only one animation loop and pauses it', async ({ page }) => {
   });
   await page.goto('/');
   await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  await expect(page.locator('html')).not.toHaveClass(/scene-revealing/);
   await page.getByRole('button', { name: 'Pause motion' }).click();
   expect(
     await page.evaluate(
       () => (window as typeof window & { framePeak: number }).framePeak,
     ),
   ).toBe(1);
+});
+
+test('paused icons cannot be dragged', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  await expect(page.locator('html')).not.toHaveClass(/scene-revealing/);
+  await page.getByRole('button', { name: 'Pause motion' }).click();
+  const icon = page.locator('[data-object="linkedin"]');
+  const before = (await icon.boundingBox())!;
+  await page.mouse.move(
+    before.x + before.width / 2,
+    before.y + before.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(1000, 200, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(() => icon.boundingBox()).toEqual(before);
+  await expect(
+    page.getByRole('button', { name: 'Reset positions' }),
+  ).toBeHidden();
+});
+
+test('3D icons finish their entrance animation while motion is paused', async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem('motion-paused', 'true'));
+  let releaseScene!: () => void;
+  let sceneRequested!: () => void;
+  const sceneRequest = new Promise<void>((resolve) => {
+    sceneRequested = resolve;
+  });
+  const release = new Promise<void>((resolve) => {
+    releaseScene = resolve;
+  });
+  await page.route(/\/scene\.[^/]+\.js$/, async (route) => {
+    sceneRequested();
+    await release;
+    await route.continue();
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await sceneRequest;
+  releaseScene();
+  await expect(page.locator('html')).toHaveClass(/scene-ready/);
+  await expect(page.locator('html')).toHaveClass(/scene-revealing/);
+  await expect(page.locator('html')).not.toHaveClass(/scene-revealing/, {
+    timeout: 3_000,
+  });
+  await expect(
+    page.getByRole('button', { name: 'Resume motion' }),
+  ).toBeVisible();
 });
 
 test('stars follow the pointer and stop when motion is paused or reduced', async ({
@@ -334,7 +421,6 @@ test('icons stay above controls and stay put after a motionless release', async 
   await page.goto('/');
   await expect(page.locator('html')).toHaveClass(/scene-ready/);
   const icon = page.locator('[data-object="linkedin"]');
-  await page.getByRole('button', { name: 'Pause motion' }).click();
   const control = (await page.locator('#motion-toggle').boundingBox())!;
   const source = (await icon.boundingBox())!;
   await page.mouse.move(
@@ -347,6 +433,8 @@ test('icons stay above controls and stay put after a motionless release', async 
     control.y + control.height / 2,
     { steps: 12 },
   );
+  await page.locator('#motion-toggle').focus();
+  await page.locator('#motion-toggle').press('Enter');
   await page.mouse.up();
   expect(
     await page.evaluate(
@@ -443,13 +531,14 @@ test('displaced icons remain anchored to the document during scrolling', async (
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
   await expect(page.locator('html')).toHaveClass(/scene-ready/);
-  await page.getByRole('button', { name: 'Pause motion' }).click();
+  await expect(page.locator('html')).not.toHaveClass(/scene-revealing/);
   const icon = page.locator('[data-object="linkedin"]');
   const start = (await icon.boundingBox())!;
   await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
   await page.mouse.down();
   await page.mouse.move(300, 180, { steps: 10 });
   await page.mouse.up();
+  await page.getByRole('button', { name: 'Pause motion' }).click();
   await expect(
     page.getByRole('button', { name: 'Reset positions' }),
   ).toBeVisible();
@@ -476,7 +565,7 @@ test('the bottom wall is the stable bottom of the full document', async ({
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
   await expect(page.locator('html')).toHaveClass(/scene-ready/);
-  await page.getByRole('button', { name: 'Pause motion' }).click();
+  await expect(page.locator('html')).not.toHaveClass(/scene-revealing/);
   const icon = page.locator('[data-object="linkedin"]');
   const start = (await icon.boundingBox())!;
   const initialHeight = await page.evaluate(
@@ -520,6 +609,7 @@ test('the bottom wall is the stable bottom of the full document', async ({
   await page.mouse.down();
   await page.mouse.move(640, 719, { steps: 6 });
   await page.mouse.up();
+  await page.getByRole('button', { name: 'Pause motion' }).click();
 
   await expect
     .poll(() =>
@@ -684,6 +774,7 @@ test.describe('mobile touch interactions', () => {
   }) => {
     await page.goto('/');
     await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator('html')).not.toHaveClass(/scene-revealing/);
     const link = page.locator('[data-object="github"]');
     const before = await link.boundingBox();
     const popupPromise = page.waitForEvent('popup');
@@ -757,6 +848,7 @@ test.describe('mobile touch interactions', () => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator('html')).not.toHaveClass(/scene-revealing/);
       await expect(page.locator('#motion-toggle')).toBeVisible();
       expect(
         await page

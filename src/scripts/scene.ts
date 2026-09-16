@@ -6,6 +6,7 @@ import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 
 const baseRotationY = [-0.3, 0.22, -0.2];
 const baseRotationZ = [-0.16, 0.15, -0.14];
+const revealDriftX = [-0.08, 0.035, 0.08];
 const mobileViewportOverscan = 96;
 const svgLoader = new SVGLoader();
 type ObjectId = 'linkedin' | 'github' | 'email';
@@ -160,7 +161,19 @@ function createObject(id: ObjectId, profile: RenderProfile) {
       0.017,
     );
   }
-  return { group, vertices: collisionVertices(group) };
+  const materials = new Set<THREE.Material>();
+  group.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const childMaterials = Array.isArray(child.material)
+      ? child.material
+      : [child.material];
+    for (const childMaterial of childMaterials) materials.add(childMaterial);
+  });
+  return {
+    group,
+    vertices: collisionVertices(group),
+    materials: [...materials],
+  };
 }
 
 export function createScene(isPaused: () => boolean) {
@@ -181,6 +194,9 @@ export function createScene(isPaused: () => boolean) {
     curveSegments: mobile ? 10 : 16,
     bevelSegments: 2,
   };
+  const reduceMotion = window.matchMedia(
+    '(prefers-reduced-motion: reduce)',
+  ).matches;
   let renderer: THREE.WebGLRenderer;
   try {
     renderer = new THREE.WebGLRenderer({
@@ -219,11 +235,18 @@ export function createScene(isPaused: () => boolean) {
     const id = link.dataset.object;
     if (id !== 'linkedin' && id !== 'github' && id !== 'email')
       throw new Error('Unknown social object');
-    const { group, vertices } = createObject(id, profile);
+    const { group, vertices, materials } = createObject(id, profile);
+    for (const objectMaterial of materials) {
+      objectMaterial.transparent = !reduceMotion;
+      objectMaterial.opacity = reduceMotion ? 1 : 0;
+    }
     scene.add(group);
     return {
       group,
       vertices,
+      materials,
+      revealed: reduceMotion,
+      revealProgress: reduceMotion ? 1 : 0,
       hull: [] as Point2[],
       link,
       index,
@@ -284,6 +307,8 @@ export function createScene(isPaused: () => boolean) {
   let pointerY = 0;
   let hasInteracted = false;
   let mobileIdleStrength = mobile ? 1 : 0;
+  const revealStartedAt = performance.now();
+  if (!reduceMotion) document.documentElement.classList.add('scene-revealing');
   const finePointer = window.matchMedia('(pointer: fine)');
   function contain(item: Item, bounce = false) {
     const left = -item.hullMinX;
@@ -375,6 +400,7 @@ export function createScene(isPaused: () => boolean) {
     frame = 0;
     if (contextLost) return;
     const paused = isPaused();
+    const frameTime = now || performance.now();
     const renderHeight = mobile ? documentHeight : height;
     const dt =
       !paused && previous ? Math.min((now - previous) / 1000, 0.04) : 0;
@@ -389,8 +415,30 @@ export function createScene(isPaused: () => boolean) {
         8,
         dt,
       );
+    let revealing = false;
     for (const item of objects) {
       const { group, index } = item;
+      if (!item.revealed) {
+        const progress = THREE.MathUtils.clamp(
+          (frameTime - revealStartedAt - index * 160) / 1100,
+          0,
+          1,
+        );
+        const eased = (1 - Math.cos(Math.PI * progress)) / 2;
+        const opacityProgress = THREE.MathUtils.clamp(progress / 0.3, 0, 1);
+        const opacity = (1 - Math.cos(Math.PI * opacityProgress)) / 2;
+        item.revealProgress = eased;
+        for (const objectMaterial of item.materials) {
+          objectMaterial.opacity = opacity;
+        }
+        if (progress === 1) {
+          item.revealed = true;
+          for (const objectMaterial of item.materials) {
+            objectMaterial.transparent = false;
+            objectMaterial.needsUpdate = true;
+          }
+        } else revealing = true;
+      }
       const phase = elapsed * 0.7 + index * 2.1;
       const idleRotationScale = 1 + mobileIdleStrength * 0.6;
       if (item.floating && !paused && drag?.item !== item && !item.focused) {
@@ -478,16 +526,21 @@ export function createScene(isPaused: () => boolean) {
             0.075 *
             mobileIdleStrength
           : 0;
+      const revealOffsetX =
+        revealDriftX[item.index] * (1 - item.revealProgress);
+      const revealOffsetY = (1 - item.revealProgress) * 0.18;
       item.group.position.set(
-        (item.x - width / 2) / 100 + idleX,
-        (renderHeight / 2 - (mobile ? item.y : item.y - scrollY)) / 100 + idleY,
+        (item.x - width / 2) / 100 + idleX + revealOffsetX,
+        (renderHeight / 2 - (mobile ? item.y : item.y - scrollY)) / 100 +
+          idleY -
+          revealOffsetY,
         0,
       );
       // The real HTML link travels with the mesh; keyboard navigation stays native.
       if (mobile) {
         const hitSize = Math.max(44, item.scale * 200);
-        const linkX = item.x - hitSize / 2;
-        const linkY = item.y - hitSize / 2;
+        const linkX = item.x - hitSize / 2 + revealOffsetX * 100;
+        const linkY = item.y - hitSize / 2 + revealOffsetY * 100;
         if (
           item.linkX !== linkX ||
           item.linkY !== linkY ||
@@ -503,9 +556,11 @@ export function createScene(isPaused: () => boolean) {
       } else {
         item.link.style.width = `${item.hullMaxX - item.hullMinX}px`;
         item.link.style.height = `${item.hullMaxY - item.hullMinY}px`;
-        item.link.style.transform = `translate3d(${item.x + item.hullMinX}px, ${item.y - scrollY + item.hullMinY}px, 0)`;
+        item.link.style.transform = `translate3d(${item.x + item.hullMinX + revealOffsetX * 100}px, ${item.y - scrollY + item.hullMinY + revealOffsetY * 100}px, 0)`;
       }
     }
+    if (!revealing)
+      document.documentElement.classList.remove('scene-revealing');
     if (!hasFloating) resetButton?.setAttribute('hidden', '');
     if (mobile) {
       const visualTop = visualViewport?.pageTop ?? scrollY;
@@ -532,7 +587,10 @@ export function createScene(isPaused: () => boolean) {
       renderer.setScissorTest(true);
     }
     renderer.render(scene, camera);
-    if (!paused && !document.hidden && (stageVisible || hasFloating))
+    if (
+      !document.hidden &&
+      (revealing || (!paused && (stageVisible || hasFloating)))
+    )
       frame = requestAnimationFrame(draw);
   }
   function requestFrame() {
@@ -626,7 +684,7 @@ export function createScene(isPaused: () => boolean) {
     });
     link.addEventListener('dragstart', (event) => event.preventDefault());
     link.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0 || drag || contextLost) return;
+      if (event.button !== 0 || drag || contextLost || isPaused()) return;
       // WebKit needs the default touch start to synthesize a link click on tap.
       // CSS touch-action reserves drags without cancelling that activation.
       if (event.pointerType === 'mouse') event.preventDefault();
@@ -795,7 +853,7 @@ export function createScene(isPaused: () => boolean) {
     cancelAnimationFrame(frame);
     frame = 0;
     document.documentElement.classList.remove('scene-ready');
-    if (mobile) window.dispatchEvent(new Event('scenefallback'));
+    window.dispatchEvent(new Event('scenefallback'));
     resetButton.hidden = true;
     for (const item of objects) {
       item.link.removeAttribute('style');
@@ -807,7 +865,18 @@ export function createScene(isPaused: () => boolean) {
   });
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     contextLost = false;
+    document.documentElement.classList.remove(
+      'scene-fallback',
+      'mobile-static',
+    );
+    document.documentElement.classList.toggle('scene-mobile', mobile);
     document.documentElement.classList.add('scene-ready');
+    resetButton.hidden = !objects.some((item) => item.floating);
+    document.querySelector<HTMLButtonElement>('#motion-toggle')!.hidden = false;
+    if (mobile) {
+      for (const item of objects)
+        stageElement?.parentElement?.insertBefore(item.link, stageElement);
+    }
     measure();
     requestFrame();
   });

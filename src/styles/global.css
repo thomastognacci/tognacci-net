@@ -252,7 +252,7 @@ h1 .last-name {
   box-shadow:
     inset 3px 3px 7px #ffffff80,
     9px 15px 25px #0005;
-  display: grid;
+  display: none;
   place-items: center;
   font-size: 60px;
   font-weight: 700;
@@ -267,6 +267,26 @@ h1 .last-name {
   width: 126px;
   height: 126px;
   object-fit: contain;
+}
+.scene-fallback .mobile-static-object {
+  display: block;
+}
+.scene-fallback .social-links {
+  width: min(100%, 560px);
+  margin-inline: auto;
+}
+.scene-fallback-message {
+  display: none;
+  position: absolute;
+  inset: auto 0 7px;
+  margin: 0;
+  text-align: center;
+  color: #8f8aa8;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.scene-fallback .scene-fallback-message {
+  display: block;
 }
 .github .fallback-object {
   background: linear-gradient(135deg, #cea8ff, #7740c5);
@@ -540,9 +560,6 @@ h2 span {
   .mobile-static #scene {
     display: none;
   }
-  .mobile-static .mobile-static-object {
-    display: block;
-  }
   .mobile-static .fallback-object {
     display: none;
   }
@@ -585,6 +602,10 @@ h2 span {
 }
 .scene-ready .social-link.is-dragging {
   cursor: grabbing;
+}
+.motion-paused.scene-ready .social-link {
+  cursor: pointer;
+  touch-action: manipulation;
 }
 .hero-bottom .motion-control {
   position: relative;
