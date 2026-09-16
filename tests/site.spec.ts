@@ -840,6 +840,7 @@ test.describe('mobile touch interactions', () => {
       await page.setViewportSize(viewport);
       await page.goto('/');
       await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator('html')).not.toHaveClass(/scene-revealing/);
       await expect(page.locator('#motion-toggle')).toBeVisible();
       expect(
         await page
